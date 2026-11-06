@@ -172,9 +172,7 @@ export default function NotificationStack({
 }: NotificationStackProps) {
   const [items, setItems] = useState(notifications);
   const [heights, setHeights] = useState<Record<string, number>>({});
-  const [hovered, setHovered] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const [pinned, setPinned] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [leaving, setLeaving] = useState<Set<string>>(() => new Set());
 
   const listRef = useRef<HTMLOListElement>(null);
@@ -246,7 +244,7 @@ export default function NotificationStack({
     return () => observer.disconnect();
   }, []);
 
-  const expanded = (hovered || focused || pinned) && items.length > 1;
+  const expanded = isExpanded && items.length > 1;
   const heightOf = (id: string) => heights[id] ?? FALLBACK_HEIGHT;
 
   // Cards that are on their way out no longer take up room, so the rest
@@ -517,26 +515,7 @@ export default function NotificationStack({
 
   return (
     // biome-ignore lint/a11y: hover and focus only widen the stack; every action has its own button.
-    <div
-      className={cn("w-full max-w-sm", className)}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node)) {
-          setFocused(false);
-        }
-      }}
-      onFocus={() => setFocused(true)}
-      onPointerEnter={(event) => {
-        // Touch screens fire pointerenter on tap; only a real hover expands.
-        if (event.pointerType === "mouse") {
-          setHovered(true);
-        }
-      }}
-      onPointerLeave={(event) => {
-        if (event.pointerType === "mouse") {
-          setHovered(false);
-        }
-      }}
-    >
+    <div className={cn("w-full max-w-sm", className)}>
       <div className="mb-3 flex h-7 items-center justify-between px-1">
         <p className="font-medium text-sm text-zinc-900 dark:text-zinc-100">
           Notifications
@@ -547,8 +526,8 @@ export default function NotificationStack({
         {laidOut.length > 1 && (
           <button
             aria-expanded={expanded}
-            className="rounded-md px-2 py-1 text-sm text-zinc-500 transition-colors duration-150 hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-            onClick={() => setPinned((prev) => !prev)}
+            className="rounded-md px-2 py-1 text-sm text-zinc-400 hover:text-white transition-colors duration-150 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 cursor-pointer"
+            onClick={() => setIsExpanded((prev) => !prev)}
             type="button"
           >
             {expanded ? "Show less" : "Show all"}
@@ -634,7 +613,7 @@ export default function NotificationStack({
                       return;
                     }
                     if (!expanded) {
-                      setPinned(true);
+                      setIsExpanded(true);
                     }
                   }}
                   onKeyDown={(event) => handleCardKeyDown(event, item.id)}
