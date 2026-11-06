@@ -108,7 +108,7 @@ export function AddBalanceModal({ open, onClose }: AddBalanceModalProps) {
       />
 
       {/* Modal Dialog */}
-      <div className="relative z-50 w-full max-w-lg rounded-3xl border border-white/20 bg-zinc-950/90 p-6 md:p-8 text-zinc-100 shadow-[0_25px_60px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.22)] backdrop-blur-2xl animate-in zoom-in-95">
+      <div className="relative z-50 w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-3xl border border-white/20 bg-zinc-950/90 p-5 sm:p-6 md:p-8 text-zinc-100 shadow-[0_25px_60px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.22)] backdrop-blur-2xl animate-in zoom-in-95">
         <button
           type="button"
           onClick={onClose}

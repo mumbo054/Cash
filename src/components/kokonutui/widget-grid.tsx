@@ -112,8 +112,8 @@ const COLUMNS = 6;
 const NARROW_COLUMNS = 2;
 const MIN_SPAN = 2;
 const GAP = 12;
-/** Matches the `@xl/wg` container query (36rem). */
-const NARROW_BELOW = 576;
+/** Matches mobile breakpoint (768px). Below this, tiles stack full width like Available Balance. */
+const NARROW_BELOW = 768;
 const LONG_PRESS_MS = 350;
 const PRESS_SLOP = 8;
 const LIFT_Z = 18;
@@ -127,7 +127,7 @@ const SIZE_LABEL: Record<WidgetSize, string> = {
 /** Maps a column span to the widget layout it shows. */
 export function sizeForSpan(span: number, narrow = false): WidgetSize {
   if (narrow) {
-    return span <= MIN_SPAN ? "s" : "m";
+    return "m";
   }
   if (span <= 2) {
     return "s";
@@ -139,9 +139,9 @@ function clampSpan(span: number) {
   return Math.min(COLUMNS, Math.max(MIN_SPAN, Math.round(span)));
 }
 
-/** In the 2-column layout, small widgets take one column, the rest both. */
-function narrowSpan(span: number) {
-  return span <= MIN_SPAN ? 1 : 2;
+/** In the mobile layout, all widgets take full width (2 columns) matching the Available Balance tile size. */
+function narrowSpan(_span: number) {
+  return 2;
 }
 
 function normalizeLayout(
@@ -980,29 +980,31 @@ function WidgetCell({
         </div>
       </div>
 
-      <button
-        aria-label={`Resize ${item.title}, ${shownSpan} of ${columns} columns`}
-        className={cn(
-          "absolute right-0 bottom-0 flex size-7 cursor-ew-resize touch-none items-end justify-end rounded-br-2xl p-1.5 text-zinc-400 outline-none dark:text-zinc-500",
-          "opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover/cell:opacity-100 [@media(hover:none)]:opacity-70",
-          "hover:text-zinc-700 focus-visible:text-(--wg-accent) dark:hover:text-zinc-200"
-        )}
-        data-no-press
-        onKeyDown={onResizeKeyDown}
-        onPointerDown={onResizePointerDown}
-        type="button"
-      >
-        <svg
-          aria-hidden="true"
-          className="size-2.5"
-          fill="none"
-          viewBox="0 0 10 10"
+      {!narrow && (
+        <button
+          aria-label={`Resize ${item.title}, ${shownSpan} of ${columns} columns`}
+          className={cn(
+            "absolute right-0 bottom-0 flex size-7 cursor-ew-resize touch-none items-end justify-end rounded-br-2xl p-1.5 text-zinc-400 outline-none dark:text-zinc-500",
+            "opacity-0 transition-opacity duration-150 focus-visible:opacity-100 group-hover/cell:opacity-100",
+            "hover:text-zinc-700 focus-visible:text-(--wg-accent) dark:hover:text-zinc-200"
+          )}
+          data-no-press
+          onKeyDown={onResizeKeyDown}
+          onPointerDown={onResizePointerDown}
+          type="button"
         >
-          <circle cx="8.5" cy="3.5" fill="currentColor" r="1.1" />
-          <circle cx="6" cy="6" fill="currentColor" r="1.1" />
-          <circle cx="3.5" cy="8.5" fill="currentColor" r="1.1" />
-        </svg>
-      </button>
+          <svg
+            aria-hidden="true"
+            className="size-2.5"
+            fill="none"
+            viewBox="0 0 10 10"
+          >
+            <circle cx="8.5" cy="3.5" fill="currentColor" r="1.1" />
+            <circle cx="6" cy="6" fill="currentColor" r="1.1" />
+            <circle cx="3.5" cy="8.5" fill="currentColor" r="1.1" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

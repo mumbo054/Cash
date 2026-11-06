@@ -181,7 +181,7 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
       />
 
       {/* Modal Dialog */}
-      <div className="relative z-50 flex flex-col md:flex-row gap-4 items-stretch max-w-2xl w-full rounded-3xl border border-white/20 bg-zinc-950/95 p-5 md:p-6 text-zinc-100 shadow-[0_25px_60px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.22)] backdrop-blur-2xl animate-in zoom-in-95">
+      <div className="relative z-50 flex flex-col md:flex-row gap-4 items-stretch max-w-2xl w-full max-h-[92vh] overflow-y-auto rounded-3xl border border-white/20 bg-zinc-950/95 p-4 sm:p-5 md:p-6 text-zinc-100 shadow-[0_25px_60px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.22)] backdrop-blur-2xl animate-in zoom-in-95">
         <button
           type="button"
           onClick={onClose}
@@ -269,6 +269,30 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
               <span className="text-[10px] text-zinc-400 font-mono">
                 Bal: {formatINR(currentWallet?.balance ?? 0)}
               </span>
+            </div>
+
+            {/* Mobile Contact Quick-Pick Ribbon */}
+            <div className="flex md:hidden items-center gap-1.5 overflow-x-auto py-2 scrollbar-none border-b border-white/10">
+              {registeredContacts.map((c) => {
+                const isSelected = !isCustom && selectedRecipient.handle === c.handle;
+                return (
+                  <button
+                    key={c.handle}
+                    type="button"
+                    onClick={() => {
+                      setSelectedRecipient(c);
+                      setIsCustom(false);
+                    }}
+                    className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] transition-all cursor-pointer ${
+                      isSelected
+                        ? "bg-[#00D632]/20 border border-[#00D632]/40 text-[#00D632] font-semibold"
+                        : "bg-white/5 border border-white/10 text-zinc-300 hover:bg-white/10"
+                    }`}
+                  >
+                    <span>{c.name.split(" ")[0]}</span>
+                  </button>
+                );
+              })}
             </div>
 
             {/* Shop Itemized Tally Ribbon */}

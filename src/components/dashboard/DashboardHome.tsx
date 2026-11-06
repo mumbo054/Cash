@@ -353,9 +353,9 @@ export function DashboardHome() {
         </Sidebar>
 
         {/* Main Content Area */}
-        <SidebarInset className="flex flex-1 flex-col bg-black overflow-y-auto">
+        <SidebarInset className="flex flex-1 flex-col bg-black overflow-y-auto overflow-x-hidden min-w-0">
           {/* Header Bar */}
-          <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-black/85 px-4 md:px-8 backdrop-blur-2xl">
+          <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-black/85 px-3 sm:px-4 md:px-8 backdrop-blur-2xl">
             {/* Left section: Toggle & Greeting */}
             <div className="flex items-center gap-3">
               <SidebarTrigger className="text-zinc-400 hover:text-white hover:bg-white/10 p-2 rounded-xl transition-colors cursor-pointer" />
@@ -406,25 +406,31 @@ export function DashboardHome() {
                   <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-[#00D632] ring-2 ring-black" />
                 </button>
 
-                {/* Notifications Dropdown Panel */}
+                {/* Notifications Dropdown Panel (Responsive: fixed full-width ribbon on mobile, anchored on desktop) */}
                 {notificationsOpen && (
-                  <div className="absolute right-0 top-12 z-50 w-80 sm:w-96 rounded-3xl border border-white/20 bg-zinc-950/95 p-4 shadow-[0_25px_60px_rgba(0,0,0,0.85),inset_0_1px_1px_rgba(255,255,255,0.22)] backdrop-blur-2xl animate-in zoom-in-95">
-                    <div className="flex items-center justify-between pb-3 mb-2 border-b border-white/10">
-                      <div>
-                        <h4 className="text-xs font-bold text-white tracking-tight">Notifications</h4>
-                        <p className="text-[10px] text-zinc-400">Bills, autopay & money requests</p>
+                  <>
+                    <div
+                      className="fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px] sm:hidden"
+                      onClick={() => setNotificationsOpen(false)}
+                    />
+                    <div className="fixed inset-x-3 top-16 z-50 sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 w-auto sm:w-96 rounded-3xl border border-white/20 bg-zinc-950/95 p-4 shadow-[0_25px_60px_rgba(0,0,0,0.9),inset_0_1px_1px_rgba(255,255,255,0.22)] backdrop-blur-2xl animate-in fade-in-0 zoom-in-95">
+                      <div className="flex items-center justify-between pb-3 mb-2 border-b border-white/10">
+                        <div>
+                          <h4 className="text-xs font-bold text-white tracking-tight">Notifications</h4>
+                          <p className="text-[10px] text-zinc-400">Bills, autopay & money requests</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setNotificationsOpen(false)}
+                          className="rounded-full p-1 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                        >
+                          <X className="size-3.5" />
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setNotificationsOpen(false)}
-                        className="rounded-full p-1 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                      >
-                        <X className="size-3.5" />
-                      </button>
-                    </div>
 
-                    <NotificationStack />
-                  </div>
+                      <NotificationStack />
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -490,7 +496,7 @@ export function DashboardHome() {
           </header>
 
           {/* Main Content: Kokonut UI WidgetGrid */}
-          <main className="flex-1 p-4 md:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+          <main className="flex-1 p-3 sm:p-4 md:p-6 lg:p-8 max-w-7xl w-full mx-auto overflow-x-hidden">
             {/* Page Sub-header */}
             <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div>
