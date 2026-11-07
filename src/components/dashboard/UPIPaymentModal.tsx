@@ -107,26 +107,39 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
     const list: Recipient[] = [];
     const seen = new Set<string>();
 
-    // 1. Add database profiles first (excluding current user's profile)
+    // 1. Add database profiles first (prioritize active @cash.me users, exclude legacy)
     if (profiles && profiles.length > 0) {
-      profiles
-        .filter((p) => p.id !== currentWallet?.user_id)
-        .forEach((p) => {
-          const key = p.full_name.toLowerCase().trim();
-          if (!seen.has(key)) {
-            seen.add(key);
-            list.push({
-              name: p.full_name,
-              handle: p.email
-                ? p.email.endsWith("@cash.test")
-                  ? `${p.email.split("@")[0]}@cash`
-                  : p.email
-                : p.phone || `${key.replace(/\s+/g, "")}@cash`,
-              phone: p.phone || undefined,
-              type: "person",
-            });
-          }
+      const sorted = [...profiles]
+        .filter(
+          (p) =>
+            p.id !== currentWallet?.user_id &&
+            !p.full_name?.toLowerCase().includes("legacy") &&
+            !p.email?.toLowerCase().includes("legacy")
+        )
+        .sort((a, b) => {
+          const aPriority = a.email?.endsWith("@cash.me") ? 1 : 2;
+          const bPriority = b.email?.endsWith("@cash.me") ? 1 : 2;
+          return aPriority - bPriority;
         });
+
+      sorted.forEach((p) => {
+        const key = p.full_name.toLowerCase().trim();
+        if (!seen.has(key)) {
+          seen.add(key);
+          const handle = p.email
+            ? p.email.endsWith("@cash.me") || p.email.endsWith("@cash.test")
+              ? `${p.email.split("@")[0]}@cash`
+              : p.email
+            : p.phone || `${key.replace(/\s+/g, "")}@cash`;
+
+          list.push({
+            name: p.full_name,
+            handle,
+            phone: p.phone || undefined,
+            type: "person",
+          });
+        }
+      });
     }
 
     // 2. Add all default & screenshot contacts
