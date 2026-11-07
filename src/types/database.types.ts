@@ -47,6 +47,7 @@ export interface Profile {
   full_name: string;
   email: string;
   phone: string | null;
+  upi_id?: string | null;
   avatar_url: string | null;
   kyc_status: KycStatus;
   tier: UserTier;

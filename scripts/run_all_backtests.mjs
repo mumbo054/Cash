@@ -209,6 +209,86 @@ async function runBacktests() {
   const { data: searchResults } = await clientCharlieRelogin.rpc('search_cash_users', { p_query: 'Diana' });
   assert(searchResults?.length > 0 && searchResults.some(r => r.email === dianaEmail), 'search_cash_users resolves Diana by partial name');
 
+  // -------------------------------------------------------------------------
+  // TEST 10: Live Demo Account Regression Guard (Anand -> Akash by handle)
+  // -------------------------------------------------------------------------
+  console.log('\n[Scenario 10]: Active Demo Transfer Guard (Anand -> Akash)');
+  const clientAnand = createClient(url, key);
+  const { data: anandAuth, error: anandErr } = await clientAnand.auth.signInWithPassword({
+    email: 'anand@gmail.com',
+    password: 'Cash2026!'
+  });
+  assert(!anandErr && Boolean(anandAuth?.user), 'Anand logged in successfully with Cash2026!');
+
+  const clientAkash = createClient(url, key);
+  const { data: akashAuth, error: akashErr } = await clientAkash.auth.signInWithPassword({
+    email: 'akash@cash.me',
+    password: 'Cash2026!'
+  });
+  assert(!akashErr && Boolean(akashAuth?.user), 'Akash logged in successfully with Cash2026!');
+
+  // Initial balances
+  const { data: aWalletBefore } = await clientAnand.from('wallets').select('*').eq('user_id', anandAuth.user.id).single();
+  const { data: kWalletBefore } = await clientAkash.from('wallets').select('*').eq('user_id', akashAuth.user.id).single();
+  const anandBalInit = Number(aWalletBefore.balance);
+  const akashBalInit = Number(kWalletBefore.balance);
+
+  // Check legacy account balance before
+  const { data: legacyBefore } = await clientAnon.from('profiles').select('id, wallets(balance)').eq('email', 'akash.legacy@cash.test').maybeSingle();
+  const legacyBalBefore = legacyBefore?.wallets?.[0]?.balance;
+
+  // Transfer ₹100 from Anand to Akash via 'akash@cash'
+  const { data: transferToAkash, error: tErr } = await clientAnand.rpc('transfer_cash_funds', {
+    p_recipient_identifier: 'akash@cash',
+    p_amount: 100,
+    p_category: 'peer_transfer',
+    p_description: 'Automated regression test: Anand to Akash'
+  });
+
+  assert(!tErr && transferToAkash?.success === true, 'Anand -> Akash transfer RPC executed successfully');
+  assert(transferToAkash?.is_internal === true, 'Transfer recognized as internal peer-to-peer');
+
+  // Verify Anand debited
+  const { data: aWalletAfter } = await clientAnand.from('wallets').select('*').eq('user_id', anandAuth.user.id).single();
+  assert(Number(aWalletAfter.balance) === Number((anandBalInit - 100).toFixed(2)), 'Anand wallet debited by exactly ₹100');
+
+  // Verify Akash credited
+  const { data: kWalletAfter } = await clientAkash.from('wallets').select('*').eq('user_id', akashAuth.user.id).single();
+  assert(Number(kWalletAfter.balance) === Number((akashBalInit + 100).toFixed(2)), 'Akash (akash@cash.me) wallet credited by exactly ₹100');
+
+  // Verify legacy account was NOT touched
+  const { data: legacyAfter } = await clientAnon.from('profiles').select('id, wallets(balance)').eq('email', 'akash.legacy@cash.test').maybeSingle();
+  const legacyBalAfter = legacyAfter?.wallets?.[0]?.balance;
+  assert(legacyBalBefore === legacyBalAfter, 'Legacy seed account balance strictly UNTOUCHED (Zero misrouting)');
+
+  // -------------------------------------------------------------------------
+  // TEST 11: Return Transfer Guard (Akash -> Anand by handle)
+  // -------------------------------------------------------------------------
+  console.log('\n[Scenario 11]: Return Transfer Guard (Akash -> Anand)');
+  const { data: returnTransfer, error: retErr } = await clientAkash.rpc('transfer_cash_funds', {
+    p_recipient_identifier: 'anand@cash',
+    p_amount: 100,
+    p_category: 'peer_transfer',
+    p_description: 'Automated regression test return: Akash to Anand'
+  });
+
+  assert(!retErr && returnTransfer?.success === true, 'Akash -> Anand return transfer RPC executed successfully');
+
+  const { data: aWalletFinal } = await clientAnand.from('wallets').select('*').eq('user_id', anandAuth.user.id).single();
+  const { data: kWalletFinal } = await clientAkash.from('wallets').select('*').eq('user_id', akashAuth.user.id).single();
+  assert(Number(aWalletFinal.balance) === anandBalInit, 'Anand balance perfectly restored');
+  assert(Number(kWalletFinal.balance) === akashBalInit, 'Akash balance perfectly restored');
+
+  // -------------------------------------------------------------------------
+  // TEST 12: Unique UPI ID & Legacy Exclusion Verification
+  // -------------------------------------------------------------------------
+  console.log('\n[Scenario 12]: UPI ID Integrity & Zero Legacy In Directory');
+  const { data: akashSearch } = await clientAnand.rpc('search_cash_users', { p_query: 'Akash' });
+  assert(akashSearch?.length === 1 && akashSearch[0].email === 'akash@cash.me', 'search_cash_users returns only active akash@cash.me (zero duplicates)');
+
+  const { data: aaravSearch } = await clientAnand.rpc('search_cash_users', { p_query: 'Aarav' });
+  assert(aaravSearch?.length === 1 && aaravSearch[0].email === 'aarav@cash.me', 'search_cash_users returns only active aarav@cash.me (zero duplicates)');
+
   console.log('\n======================================================');
   console.log(`📊 FINAL RESULTS: ${passed}/${total} BACKTESTS PASSED (${Math.round((passed/total)*100)}%)`);
   console.log('======================================================\n');
