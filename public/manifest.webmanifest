@@ -1,0 +1,17 @@
+{
+  "name": "Cash — Fintech Wallet & UPI Simulation",
+  "short_name": "Cash",
+  "description": "Simulated digital wallet, double-entry UPI payments, smart pockets, budgets & savings vault.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#00D632",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

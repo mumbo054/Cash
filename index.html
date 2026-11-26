@@ -3,16 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>Cash — Modern Digital Wallet & UPI Ecosystem</title>
     <meta name="description" content="Experience lightning-fast UPI payments, virtual RuPay Platinum cards, smart pockets, and savings vault with Cash." />
     <meta name="theme-color" content="#000000" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800;900&display=swap" rel="stylesheet">
   </head>
   <body class="bg-black text-zinc-100 min-h-screen">
-    <div id="root"></div>
+    <div id="root">
+      <!-- Build-time critical shell for immediate first paint before JS hydration -->
+      <div style="min-height:100vh;background:#000;color:#f4f4f5;display:flex;flex-direction:column;font-family:system-ui,-apple-system,sans-serif">
+        <div style="height:80px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:space-between;padding:0 24px;max-width:80rem;width:100%;margin:0 auto;box-sizing:border-box">
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:40px;height:40px;border-radius:16px;background:#00D632;display:flex;align-items:center;justify-content:center;color:#000;font-weight:900;font-size:20px">C</div>
+            <span style="font-weight:800;font-size:22px;letter-spacing:-0.02em">Cash</span>
+          </div>
+          <div style="display:flex;gap:12px">
+            <div style="width:78px;height:36px;border-radius:9999px;background:rgba(255,255,255,0.06)"></div>
+            <div style="width:88px;height:36px;border-radius:9999px;background:rgba(0,214,50,0.22)"></div>
+          </div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
