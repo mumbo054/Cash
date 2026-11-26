@@ -13,21 +13,35 @@ interface ProfileQRCardProps {
 export function ProfileQRCard({ className, isModal = false }: ProfileQRCardProps) {
   const { currentProfile, currentWallet } = useWallet();
   const [copied, setCopied] = useState(false);
+  const [qrAmount, setQrAmount] = useState("");
+  const [copiedLink, setCopiedLink] = useState(false);
 
-  const fullName = currentProfile?.full_name || "Aarav Sharma";
+  const fullName = currentProfile?.full_name || "Cash User";
   const cashtag = currentProfile?.full_name
     ? currentProfile.full_name.toLowerCase().replace(/\s+/g, "")
-    : "aarav";
-  const upiId = `${cashtag}@cash`;
-  const phone = currentProfile?.phone || "+91 98765 43210";
-  const dailyLimit = currentWallet?.daily_limit ?? 100000;
+    : "cash";
+  const upiId = currentProfile?.upi_id || `${cashtag}@cash`;
+  const phone = currentProfile?.phone || "Not linked";
+  const dailyLimit = currentWallet?.daily_limit ?? 50000;
   const isKycVerified = currentProfile?.kyc_status === "verified";
+  const amtNum = parseFloat(qrAmount);
+  const upiPayload =
+    !isNaN(amtNum) && amtNum > 0
+      ? `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(fullName)}&am=${amtNum.toFixed(2)}&cu=INR`
+      : `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(fullName)}&cu=INR`;
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
     navigator.clipboard.writeText(upiId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyQrLink = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(upiPayload);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
   };
 
   const frontFace = (
@@ -48,7 +62,7 @@ export function ProfileQRCard({ className, isModal = false }: ProfileQRCardProps
         </div>
         <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
           <ShieldCheck className="w-3 h-3" />
-          {isKycVerified ? "KYC Verified" : "KYC Pending"}
+          KYC: {currentProfile?.kyc_status || (isKycVerified ? "verified" : "pending")}
         </span>
       </div>
 
@@ -149,7 +163,27 @@ export function ProfileQRCard({ className, isModal = false }: ProfileQRCardProps
             <rect x="82" y="82" width="10" height="10" rx="2" fill="#00D632" />
           </svg>
         </div>
-        <p className="mt-2 text-[10px] text-zinc-400 font-mono text-center">{upiId}</p>
+        <p className="mt-1.5 text-[10px] text-zinc-400 font-mono text-center">{upiId}</p>
+        <div className="mt-2 flex items-center gap-1.5 w-full max-w-[230px]" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="number"
+            data-no-flip
+            min="1"
+            step="1"
+            value={qrAmount}
+            onChange={(e) => setQrAmount(e.target.value)}
+            placeholder="Lock ₹ amt (optional)"
+            className="flex-1 h-7 px-2 rounded-lg bg-zinc-900 border border-white/15 text-[10px] font-mono text-white placeholder:text-zinc-500 focus:outline-none focus:border-[#00D632]"
+          />
+          <button
+            type="button"
+            data-no-flip
+            onClick={handleCopyQrLink}
+            className="h-7 px-2 rounded-lg bg-[#00D632]/15 border border-[#00D632]/30 text-[10px] font-semibold text-[#00D632] hover:bg-[#00D632]/25 cursor-pointer shrink-0"
+          >
+            {copiedLink ? "Copied ✓" : "Copy UPI Link"}
+          </button>
+        </div>
       </div>
 
       <div className="w-full flex items-center justify-between pt-2 border-t border-white/10 text-[10px] text-zinc-400">

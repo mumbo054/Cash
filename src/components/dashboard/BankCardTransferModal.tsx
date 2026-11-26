@@ -1,10 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { X, CreditCard, Building2, ShieldCheck, CheckCircle2 } from "lucide-react";
+import { X, CreditCard, Building2, ShieldCheck, CheckCircle2, Lock } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 import { SlideToConfirm } from "@/components/kokonutui/SlideToConfirm";
 import { formatINR } from "@/utils/formatters";
+import { generateIdempotencyKey } from "@/lib/cache";
+import { useDebounce } from "@/hooks/use-debounce";
+import { TransferQuote } from "@/types/database.types";
 
 interface BankCardTransferModalProps {
   open: boolean;
@@ -27,7 +30,7 @@ export function BankCardTransferModal({
   onClose,
   defaultTab = "card",
 }: BankCardTransferModalProps) {
-  const { currentWallet, sendMoney } = useWallet();
+  const { currentWallet, sendMoney, securityStatus, previewTransferQuote } = useWallet();
   const [tab, setTab] = React.useState<"card" | "bank">(defaultTab);
 
   // Card Form state
@@ -48,18 +51,88 @@ export function BankCardTransferModal({
 
   const [statusMessage, setStatusMessage] = React.useState<string | null>(null);
   const [isSuccess, setIsSuccess] = React.useState(false);
+  const [transactionPin, setTransactionPin] = React.useState("");
+  const [pinPromptRequested, setPinPromptRequested] = React.useState(false);
+  const [quote, setQuote] = React.useState<TransferQuote | null>(null);
+  const attemptKeyRef = React.useRef<string>(generateIdempotencyKey());
+  const debouncedAmt = useDebounce(tab === "card" ? cardAmount : bankAmount, 250);
 
   React.useEffect(() => {
     if (open) {
       setTab(defaultTab);
       setStatusMessage(null);
       setIsSuccess(false);
+      setTransactionPin("");
+      setPinPromptRequested(false);
+      setQuote(null);
+      attemptKeyRef.current = generateIdempotencyKey();
     }
   }, [open, defaultTab]);
+
+  React.useEffect(() => {
+    const amtNum = parseFloat(debouncedAmt);
+    if (!open || isNaN(amtNum) || amtNum <= 0) {
+      setQuote(null);
+      return;
+    }
+    let cancelled = false;
+    const target = tab === "card" ? `CARD-${cardNumber.replace(/\s+/g, "").slice(-4) || "0000"}` : `A/C ${accountNumber.slice(-4)}`;
+    void previewTransferQuote(target, amtNum, tab === "bank" ? "imps_payout" : "card").then((q) => {
+      if (!cancelled) setQuote(q);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, tab, debouncedAmt, cardNumber, accountNumber, previewTransferQuote]);
 
   if (!open) return null;
 
   const detectedBank = ifsc.length >= 4 ? BANK_IFSC_MAP[ifsc.slice(0, 4).toUpperCase()] : null;
+  const activeAmount = tab === "card" ? parseFloat(cardAmount) || 0 : parseFloat(bankAmount) || 0;
+  const pinThreshold = securityStatus?.pin_threshold ?? 2000;
+  const needsPinInput =
+    Boolean(securityStatus?.has_pin) && (pinPromptRequested || activeAmount >= pinThreshold);
+
+  const quoteSummaryBlock = quote ? (
+    <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] flex flex-wrap items-center justify-between gap-2 text-zinc-300">
+      <span>
+        Fee: <strong className="font-mono text-white">{formatINR(quote.fee_amount)}</strong> + GST:{" "}
+        <strong className="font-mono text-white">{formatINR(quote.gst_amount)}</strong>
+      </span>
+      <span className="font-mono">
+        Total Debit: <strong className="text-[#00D632]">{formatINR(quote.total_payable)}</strong>
+      </span>
+      {quote.duplicate_recent && (
+        <span className="w-full text-amber-300 font-medium">
+          Duplicate alert: same amount was transferred within 5 minutes.
+        </span>
+      )}
+    </div>
+  ) : null;
+
+  const pinFieldBlock = needsPinInput ? (
+    <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2 text-amber-200 min-w-0">
+        <Lock className="size-3.5 shrink-0 text-amber-400" />
+        <span className="text-[11px] font-medium truncate">
+          Transaction PIN required ≥ {formatINR(pinThreshold)}
+        </span>
+      </div>
+      <input
+        type="password"
+        inputMode="numeric"
+        maxLength={6}
+        value={transactionPin}
+        onChange={(e) => {
+          setTransactionPin(e.target.value.replace(/\D/g, "").slice(0, 6));
+          if (statusMessage && !isSuccess) setStatusMessage(null);
+        }}
+        placeholder="4-6 digits"
+        aria-label="Transaction PIN"
+        className="w-28 h-8 px-2.5 rounded-lg bg-zinc-950 border border-amber-400/40 text-center font-mono text-xs tracking-widest text-white placeholder:text-zinc-600 focus:outline-none focus:border-[#00D632]"
+      />
+    </div>
+  ) : null;
 
   // Format Card Number input with spaces
   const handleCardNumberChange = (val: string) => {
@@ -84,17 +157,23 @@ export function BankCardTransferModal({
       recipientUpiOrPhone: `CARD-${cleanCard.slice(-4)}`,
       recipientName: cardName || "Cardholder",
       amount: amt,
-      category: "utilities",
+      category: amt >= 5000 ? "imps_payout" : "utilities",
       description: `${cardNote} (${cleanCard.slice(0, 4)}••••${cleanCard.slice(-4)})`,
+      pin: transactionPin || undefined,
+      idempotencyKey: attemptKeyRef.current,
     });
 
     if (res.success) {
       setIsSuccess(true);
+      setTransactionPin("");
+      setPinPromptRequested(false);
+      attemptKeyRef.current = generateIdempotencyKey();
       setStatusMessage(`Payment of ${formatINR(amt)} to Card ending in ${cleanCard.slice(-4)} processed!`);
       setTimeout(() => {
         onClose();
       }, 2000);
     } else {
+      if (res.pinRequired) setPinPromptRequested(true);
       setStatusMessage(res.error || "Payment failed");
     }
   };
@@ -118,17 +197,23 @@ export function BankCardTransferModal({
       recipientUpiOrPhone: `A/C ${accountNumber.slice(-4)} (${ifsc})`,
       recipientName: beneficiaryName || "Beneficiary",
       amount: amt,
-      category: "transfer",
+      category: amt >= 5000 ? "imps_payout" : "transfer",
       description: `IMPS to ${beneficiaryName} - ${detectedBank || ifsc}: ${bankRemarks}`,
+      pin: transactionPin || undefined,
+      idempotencyKey: attemptKeyRef.current,
     });
 
     if (res.success) {
       setIsSuccess(true);
+      setTransactionPin("");
+      setPinPromptRequested(false);
+      attemptKeyRef.current = generateIdempotencyKey();
       setStatusMessage(`IMPS Transfer of ${formatINR(amt)} to ${beneficiaryName} dispatched successfully!`);
       setTimeout(() => {
         onClose();
       }, 2000);
     } else {
+      if (res.pinRequired) setPinPromptRequested(true);
       setStatusMessage(res.error || "Bank transfer failed");
     }
   };
@@ -301,7 +386,9 @@ export function BankCardTransferModal({
             </div>
 
             {/* Swipe to Pay with SlideToConfirm */}
-            <div className="pt-2">
+            <div className="pt-2 space-y-2">
+              {quoteSummaryBlock}
+              {pinFieldBlock}
               <label className="block text-[11px] font-medium text-zinc-400 mb-1.5 text-center">
                 Swipe slider below to dispatch payment
               </label>
@@ -309,6 +396,7 @@ export function BankCardTransferModal({
                 onConfirm={handleCardTransfer}
                 label={`Slide to Pay ${formatINR(Number(cardAmount || 0))} to Card`}
                 confirmedLabel="Payment Authorized & Sent!"
+                disabled={needsPinInput && transactionPin.length < 4}
               />
             </div>
           </div>
@@ -410,7 +498,9 @@ export function BankCardTransferModal({
             </div>
 
             {/* Swipe to Pay with SlideToConfirm */}
-            <div className="pt-2">
+            <div className="pt-2 space-y-2">
+              {quoteSummaryBlock}
+              {pinFieldBlock}
               <label className="block text-[11px] font-medium text-zinc-400 mb-1.5 text-center">
                 Swipe slider below for instant 24x7 IMPS transfer
               </label>
@@ -418,6 +508,7 @@ export function BankCardTransferModal({
                 onConfirm={handleBankTransfer}
                 label={`Slide to Transfer ${formatINR(Number(bankAmount || 0))} via IMPS`}
                 confirmedLabel="IMPS Transfer Completed!"
+                disabled={needsPinInput && transactionPin.length < 4}
               />
             </div>
           </div>

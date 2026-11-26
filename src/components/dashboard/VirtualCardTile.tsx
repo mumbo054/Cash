@@ -1,15 +1,19 @@
 "use client";
 
+import * as React from "react";
 import { useState } from "react";
 import { Eye, EyeOff, Wifi, Shield } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 
-export function VirtualCardTile() {
+export const VirtualCardTile = React.memo(function VirtualCardTile() {
   const { currentProfile, currentWallet } = useWallet();
   const [showDetails, setShowDetails] = useState(false);
 
-  const fullName = currentProfile?.full_name || "Aarav Sharma";
+  const fullName = currentProfile?.full_name || "Cash Member";
   const isFrozen = currentWallet?.is_frozen ?? false;
+  const walletSuffix = (currentWallet?.wallet_number || "0000").replace(/\D/g, "").slice(-4).padStart(4, "0");
+  const virtualMiddle = (currentWallet?.id || "8910").replace(/[^0-9]/g, "").padEnd(8, "42").slice(0, 8);
+  const fullPan = `4532 ${virtualMiddle.slice(0, 4)} ${virtualMiddle.slice(4, 8)} ${walletSuffix}`;
 
   return (
     <div className="relative h-full w-full flex flex-col justify-between p-2.5 sm:p-3 text-white select-none overflow-hidden rounded-2xl">
@@ -58,7 +62,7 @@ export function VirtualCardTile() {
       {/* Card Number & Expiry */}
       <div className="relative z-10 space-y-2">
         <p className="font-mono text-base md:text-lg font-bold tracking-widest text-zinc-100">
-          {showDetails ? "4532 8910 2049 8291" : "•••• •••• •••• 8291"}
+          {showDetails ? fullPan : `•••• •••• •••• ${walletSuffix}`}
         </p>
 
         <div className="flex items-center justify-between text-xs pt-1">
@@ -90,4 +94,4 @@ export function VirtualCardTile() {
       </div>
     </div>
   );
-}
+});

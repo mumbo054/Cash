@@ -1,26 +1,37 @@
 "use client";
 
+import * as React from "react";
 import { useState } from "react";
 import { FolderHeart, Target, ChevronRight, Plus } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 import { formatINR } from "@/utils/formatters";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface PocketsGoalsTileProps {
   onOpenPockets?: (mode?: "view" | "create") => void;
   onOpenGoals?: (mode?: "view" | "create") => void;
 }
 
-export function PocketsGoalsTile({ onOpenPockets, onOpenGoals }: PocketsGoalsTileProps) {
-  const { pockets, savingsGoals, allocateToPocket, contributeToGoal } = useWallet();
+export const PocketsGoalsTile = React.memo(function PocketsGoalsTile({
+  onOpenPockets,
+  onOpenGoals,
+}: PocketsGoalsTileProps) {
+  const { pockets, savingsGoals, isLoading, allocateToPocket, contributeToGoal } = useWallet();
   const [activeTab, setActiveTab] = useState<"pockets" | "goals">("pockets");
 
-  const handleQuickAddPocket = async (id: string) => {
-    await allocateToPocket(id, 500);
-  };
+  const handleQuickAddPocket = React.useCallback(
+    (id: string) => {
+      void allocateToPocket(id, 500);
+    },
+    [allocateToPocket]
+  );
 
-  const handleQuickAddGoal = async (id: string) => {
-    await contributeToGoal(id, 1000);
-  };
+  const handleQuickAddGoal = React.useCallback(
+    (id: string) => {
+      void contributeToGoal(id, 1000);
+    },
+    [contributeToGoal]
+  );
 
   const handleManageClick = () => {
     if (activeTab === "pockets") {
@@ -37,6 +48,8 @@ export function PocketsGoalsTile({ onOpenPockets, onOpenGoals }: PocketsGoalsTil
       onOpenGoals?.("create");
     }
   };
+
+  const showSkeleton = isLoading && pockets.length === 0 && savingsGoals.length === 0;
 
   return (
     <div className="flex h-full w-full flex-col justify-between p-2 select-none">
@@ -86,7 +99,12 @@ export function PocketsGoalsTile({ onOpenPockets, onOpenGoals }: PocketsGoalsTil
 
       {/* Content Area */}
       <div className="my-auto py-2 space-y-2 overflow-y-auto max-h-[160px] scrollbar-none">
-        {activeTab === "pockets" ? (
+        {showSkeleton ? (
+          <div className="space-y-2" aria-busy="true">
+            <Skeleton className="h-14 w-full rounded-xl" />
+            <Skeleton className="h-14 w-full rounded-xl" />
+          </div>
+        ) : activeTab === "pockets" ? (
           pockets.length === 0 ? (
             <div
               onClick={() => onOpenPockets?.("create")}
@@ -128,10 +146,9 @@ export function PocketsGoalsTile({ onOpenPockets, onOpenGoals }: PocketsGoalsTil
                       </button>
                     </div>
                   </div>
-                  {/* Progress Bar */}
                   <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
                     <div
-                      className="bg-[#00D632] h-full rounded-full transition-all duration-500"
+                      className="bg-[#00D632] h-full rounded-full transition-all duration-300"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -186,10 +203,9 @@ export function PocketsGoalsTile({ onOpenPockets, onOpenGoals }: PocketsGoalsTil
                     </button>
                   </div>
                 </div>
-                {/* Progress Bar */}
                 <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
                   <div
-                    className="bg-amber-400 h-full rounded-full transition-all duration-500"
+                    className="bg-amber-400 h-full rounded-full transition-all duration-300"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
@@ -199,7 +215,6 @@ export function PocketsGoalsTile({ onOpenPockets, onOpenGoals }: PocketsGoalsTil
         )}
       </div>
 
-      {/* Footer with Manage Button */}
       <div className="flex items-center justify-between pt-2 border-t border-white/10 text-[11px] text-zinc-400">
         <span>Protected by DICGC ₹5 Lakh Insurance</span>
         <button
@@ -213,4 +228,4 @@ export function PocketsGoalsTile({ onOpenPockets, onOpenGoals }: PocketsGoalsTil
       </div>
     </div>
   );
-}
+});

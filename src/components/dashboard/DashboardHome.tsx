@@ -18,10 +18,13 @@ import {
   X,
   Building2,
   Zap,
+  Shield,
+  ShieldAlert,
+  CalendarClock,
+  PieChart,
 } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 import WidgetGrid, { WidgetGridItem, WidgetLayoutItem } from "@/components/kokonutui/widget-grid";
-import NotificationStack from "@/components/kokonutui/notification-stack";
 import ProfileDropdown, { Account } from "@/components/kokonutui/profile-dropdown";
 import {
   SidebarProvider,
@@ -47,26 +50,72 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 
-// Dashboard tiles
+// Core above-the-fold dashboard tiles
 import { BalanceActionTile } from "@/components/dashboard/BalanceActionTile";
 import { VirtualCardTile } from "@/components/dashboard/VirtualCardTile";
 import { ExpenditureMetricTile } from "@/components/dashboard/ExpenditureMetricTile";
 import { BankCardQuickTile } from "@/components/dashboard/BankCardQuickTile";
 import { TransactionHistoryTile } from "@/components/dashboard/TransactionHistoryTile";
 import { PocketsGoalsTile } from "@/components/dashboard/PocketsGoalsTile";
-import { ProfileQRCard } from "@/components/dashboard/ProfileQRCard";
 
-// Modals
-import { UPIPaymentModal } from "@/components/dashboard/UPIPaymentModal";
-import { AddBalanceModal } from "@/components/dashboard/AddBalanceModal";
-import { BankCardTransferModal } from "@/components/dashboard/BankCardTransferModal";
-import { PassbookModal } from "@/components/dashboard/PassbookModal";
-import { PocketsManagerModal } from "@/components/dashboard/PocketsManagerModal";
-import { SavingsVaultModal } from "@/components/dashboard/SavingsVaultModal";
+// Lazy-loaded modals & secondary panels (split into separate chunks)
+const loadUPIModal = () => import("@/components/dashboard/UPIPaymentModal").then((m) => ({ default: m.UPIPaymentModal }));
+const loadAddBalanceModal = () => import("@/components/dashboard/AddBalanceModal").then((m) => ({ default: m.AddBalanceModal }));
+const loadBankCardModal = () => import("@/components/dashboard/BankCardTransferModal").then((m) => ({ default: m.BankCardTransferModal }));
+const loadPassbookModal = () => import("@/components/dashboard/PassbookModal").then((m) => ({ default: m.PassbookModal }));
+const loadPocketsModal = () => import("@/components/dashboard/PocketsManagerModal").then((m) => ({ default: m.PocketsManagerModal }));
+const loadVaultModal = () => import("@/components/dashboard/SavingsVaultModal").then((m) => ({ default: m.SavingsVaultModal }));
+const loadProfileQRCard = () => import("@/components/dashboard/ProfileQRCard").then((m) => ({ default: m.ProfileQRCard }));
+const loadNotificationStack = () => import("@/components/kokonutui/notification-stack");
+const loadSecurityModal = () => import("@/components/dashboard/SecurityPinModal").then((m) => ({ default: m.SecurityPinModal }));
+const loadAdminModal = () => import("@/components/dashboard/AdminBackOfficeModal").then((m) => ({ default: m.AdminBackOfficeModal }));
+const loadCashFlowModal = () => import("@/components/dashboard/CashFlowBudgetsModal").then((m) => ({ default: m.CashFlowBudgetsModal }));
+const loadRequestsAutopayModal = () => import("@/components/dashboard/RequestsAutopayModal").then((m) => ({ default: m.RequestsAutopayModal }));
+const loadComplianceDialog = () => import("@/components/dashboard/ComplianceDialog").then((m) => ({ default: m.ComplianceDialog }));
+
+const UPIPaymentModal = React.lazy(loadUPIModal);
+const AddBalanceModal = React.lazy(loadAddBalanceModal);
+const BankCardTransferModal = React.lazy(loadBankCardModal);
+const PassbookModal = React.lazy(loadPassbookModal);
+const PocketsManagerModal = React.lazy(loadPocketsModal);
+const SavingsVaultModal = React.lazy(loadVaultModal);
+const ProfileQRCard = React.lazy(loadProfileQRCard);
+const NotificationStack = React.lazy(loadNotificationStack);
+const SecurityPinModal = React.lazy(loadSecurityModal);
+const AdminBackOfficeModal = React.lazy(loadAdminModal);
+const CashFlowBudgetsModal = React.lazy(loadCashFlowModal);
+const RequestsAutopayModal = React.lazy(loadRequestsAutopayModal);
+const ComplianceDialog = React.lazy(loadComplianceDialog);
+
+function ModalLoadingFallback() {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-3xl border border-white/15 bg-zinc-950/95 p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="size-8 rounded-full" />
+        </div>
+        <Skeleton className="h-24 w-full rounded-2xl" />
+        <Skeleton className="h-32 w-full rounded-2xl" />
+        <Skeleton className="h-11 w-full rounded-xl" />
+      </div>
+    </div>
+  );
+}
+
+const INITIAL_LAYOUT: WidgetLayoutItem[] = [
+  { id: "balance", span: 4 },
+  { id: "virtual-card", span: 2 },
+  { id: "expenditure", span: 4 },
+  { id: "bank-card-quick", span: 2 },
+  { id: "passbook", span: 3 },
+  { id: "pockets-goals", span: 3 },
+];
 
 export function DashboardHome() {
-  const { currentProfile, signOutUser } = useWallet();
+  const { currentProfile, signOutUser, isAdminOrStaff, unreadNotificationsCount } = useWallet();
 
   // Modals state
   const [upiModalOpen, setUpiModalOpen] = React.useState(false);
@@ -82,141 +131,213 @@ export function DashboardHome() {
   const [pocketsModalMode, setPocketsModalMode] = React.useState<"view" | "create">("view");
   const [vaultModalOpen, setVaultModalOpen] = React.useState(false);
   const [vaultModalMode, setVaultModalMode] = React.useState<"view" | "create">("view");
+  const [securityModalOpen, setSecurityModalOpen] = React.useState(false);
+  const [adminModalOpen, setAdminModalOpen] = React.useState(false);
+  const [cashFlowModalOpen, setCashFlowModalOpen] = React.useState(false);
+  const [requestsModalOpen, setRequestsModalOpen] = React.useState(false);
+  const [complianceModalOpen, setComplianceModalOpen] = React.useState(false);
 
-  // Active navigation tab
   const [activeNav, setActiveNav] = React.useState("home");
 
   const fullName = currentProfile?.full_name || "Aarav Sharma";
   const userEmail = currentProfile?.email || "aarav.sharma@example.com";
-  const initials = fullName
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
 
-  const userAccount: Account = {
-    id: currentProfile?.id || "user-active",
-    name: fullName,
-    email: userEmail,
-    initials: initials,
-    plan: "KYC Verified",
-  };
+  const userAccount = React.useMemo<Account>(() => {
+    const initials = fullName
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+    return {
+      id: currentProfile?.id || "user-active",
+      name: fullName,
+      email: userEmail,
+      initials,
+      plan: "KYC Verified",
+    };
+  }, [currentProfile?.id, fullName, userEmail]);
 
-  // Layout configuration for the 6-column WidgetGrid (QR card removed as requested)
-  const initialLayout: WidgetLayoutItem[] = [
-    { id: "balance", span: 4 },
-    { id: "virtual-card", span: 2 },
-    { id: "expenditure", span: 4 },
-    { id: "bank-card-quick", span: 2 },
-    { id: "passbook", span: 3 },
-    { id: "pockets-goals", span: 3 },
-  ];
+  const openUpi = React.useCallback(() => setUpiModalOpen(true), []);
+  const openAddFunds = React.useCallback(() => setAddFundsModalOpen(true), []);
+  const openBankCard = React.useCallback((tab: "card" | "bank" = "card") => {
+    setBankModalTab(tab);
+    setBankModalOpen(true);
+  }, []);
+  const openPassbook = React.useCallback((txId?: string) => {
+    setPassbookInitialTxnId(txId || null);
+    setPassbookModalOpen(true);
+  }, []);
+  const openPockets = React.useCallback((mode: "view" | "create" = "view") => {
+    setPocketsModalMode(mode);
+    setPocketsModalOpen(true);
+  }, []);
+  const openGoals = React.useCallback((mode: "view" | "create" = "view") => {
+    setVaultModalMode(mode);
+    setVaultModalOpen(true);
+  }, []);
+  const openSecurity = React.useCallback(() => setSecurityModalOpen(true), []);
+  const openAdmin = React.useCallback(() => setAdminModalOpen(true), []);
+  const openCashFlow = React.useCallback(() => setCashFlowModalOpen(true), []);
+  const openRequests = React.useCallback(() => setRequestsModalOpen(true), []);
 
-  // Definition of the 6 dashboard tiles
-  const dashboardWidgets: WidgetGridItem[] = [
-    {
-      id: "balance",
-      title: "Available Balance",
-      icon: <Wallet className="size-4 text-[#00D632]" />,
-      defaultSpan: 4,
-      render: () => (
-        <BalanceActionTile
-          onOpenUPI={() => setUpiModalOpen(true)}
-          onOpenBankCard={() => {
-            setBankModalTab("card");
-            setBankModalOpen(true);
-          }}
-          onOpenAddFunds={() => setAddFundsModalOpen(true)}
-        />
-      ),
-    },
-    {
-      id: "virtual-card",
-      title: "RuPay Platinum Card",
-      icon: <CreditCard className="size-4 text-purple-400" />,
-      defaultSpan: 2,
-      render: () => <VirtualCardTile />,
-    },
-    {
-      id: "expenditure",
-      title: "Money Usage & Expenditure Analysis",
-      icon: <TrendingUp className="size-4 text-[#00D632]" />,
-      defaultSpan: 4,
-      render: () => <ExpenditureMetricTile />,
-    },
-    {
-      id: "bank-card-quick",
-      title: "Direct Clearing: Bank & Card",
-      icon: <Building2 className="size-4 text-sky-400" />,
-      defaultSpan: 2,
-      render: () => (
-        <BankCardQuickTile
-          onOpenCardTransfer={() => {
-            setBankModalTab("card");
-            setBankModalOpen(true);
-          }}
-          onOpenBankTransfer={() => {
-            setBankModalTab("bank");
-            setBankModalOpen(true);
-          }}
-        />
-      ),
-    },
-    {
-      id: "passbook",
-      title: "Passbook & Transaction Stream",
-      icon: <History className="size-4 text-amber-400" />,
-      defaultSpan: 3,
-      render: () => (
-        <TransactionHistoryTile
-          onOpenPassbook={(txId) => {
-            setPassbookInitialTxnId(txId || null);
-            setPassbookModalOpen(true);
-          }}
-        />
-      ),
-    },
-    {
-      id: "pockets-goals",
-      title: "Smart Pockets & Savings Vault",
-      icon: <FolderHeart className="size-4 text-rose-400" />,
-      defaultSpan: 3,
-      render: () => (
-        <PocketsGoalsTile
-          onOpenPockets={(mode = "view") => {
-            setPocketsModalMode(mode);
-            setPocketsModalOpen(true);
-          }}
-          onOpenGoals={(mode = "view") => {
-            setVaultModalMode(mode);
-            setVaultModalOpen(true);
-          }}
-        />
-      ),
-    },
-  ];
+  // Memoize widget definitions so modal toggles never reconstruct the WidgetGrid schema
+  const dashboardWidgets = React.useMemo<WidgetGridItem[]>(
+    () => [
+      {
+        id: "balance",
+        title: "Available Balance",
+        icon: <Wallet className="size-4 text-[#00D632]" />,
+        defaultSpan: 4,
+        render: () => (
+          <BalanceActionTile
+            onOpenUPI={openUpi}
+            onOpenBankCard={() => openBankCard("card")}
+            onOpenAddFunds={openAddFunds}
+          />
+        ),
+      },
+      {
+        id: "virtual-card",
+        title: "RuPay Platinum Card",
+        icon: <CreditCard className="size-4 text-purple-400" />,
+        defaultSpan: 2,
+        render: () => <VirtualCardTile />,
+      },
+      {
+        id: "expenditure",
+        title: "Money Usage & Expenditure Analysis",
+        icon: <TrendingUp className="size-4 text-[#00D632]" />,
+        defaultSpan: 4,
+        render: () => <ExpenditureMetricTile onOpenCashFlow={openCashFlow} />,
+      },
+      {
+        id: "bank-card-quick",
+        title: "Direct Clearing: Bank & Card",
+        icon: <Building2 className="size-4 text-sky-400" />,
+        defaultSpan: 2,
+        render: () => (
+          <BankCardQuickTile
+            onOpenCardTransfer={() => openBankCard("card")}
+            onOpenBankTransfer={() => openBankCard("bank")}
+          />
+        ),
+      },
+      {
+        id: "passbook",
+        title: "Passbook & Transaction Stream",
+        icon: <History className="size-4 text-amber-400" />,
+        defaultSpan: 3,
+        render: () => <TransactionHistoryTile onOpenPassbook={openPassbook} />,
+      },
+      {
+        id: "pockets-goals",
+        title: "Smart Pockets & Savings Vault",
+        icon: <FolderHeart className="size-4 text-rose-400" />,
+        defaultSpan: 3,
+        render: () => <PocketsGoalsTile onOpenPockets={openPockets} onOpenGoals={openGoals} />,
+      },
+    ],
+    [openUpi, openBankCard, openAddFunds, openCashFlow, openPassbook, openPockets, openGoals]
+  );
 
-  const handleNavClick = (key: string) => {
-    setActiveNav(key);
-    if (key === "transfers") {
-      setUpiModalOpen(true);
-    } else if (key === "bank-card") {
-      setBankModalTab("card");
-      setBankModalOpen(true);
-    } else if (key === "add-balance") {
-      setAddFundsModalOpen(true);
-    } else if (key === "passbook") {
-      setPassbookInitialTxnId(null);
-      setPassbookModalOpen(true);
-    } else if (key === "pockets") {
-      setPocketsModalMode("view");
-      setPocketsModalOpen(true);
-    } else if (key === "goals") {
-      setVaultModalMode("view");
-      setVaultModalOpen(true);
-    }
-  };
+  const profileMenuItems = React.useMemo(
+    () => [
+      {
+        label: "My UPI QR & ID Card",
+        icon: <Zap className="size-4 text-[#00D632]" />,
+        value: "3D Flip",
+        onSelect: () => setProfileModalOpen(true),
+      },
+      {
+        label: "Bank & Card Transfers",
+        icon: <CreditCard className="size-4 text-purple-400" />,
+        value: "IMPS/NEFT",
+        onSelect: () => openBankCard("card"),
+      },
+      {
+        label: "Add Wallet Balance",
+        icon: <Plus className="size-4 text-[#00D632]" />,
+        value: "Cards/UPI",
+        onSelect: openAddFunds,
+      },
+      {
+        label: "Passbook & Ledger",
+        icon: <History className="size-4 text-amber-400" />,
+        value: "Statement",
+        onSelect: () => openPassbook(),
+      },
+      {
+        label: "Smart Pockets",
+        icon: <FolderHeart className="size-4 text-rose-400" />,
+        value: "Buckets",
+        onSelect: () => openPockets("view"),
+      },
+      {
+        label: "Savings Vault",
+        icon: <Target className="size-4 text-amber-400" />,
+        value: "3.2% p.a.",
+        onSelect: () => openGoals("view"),
+      },
+      {
+        label: "Requests, Split & Autopay",
+        icon: <CalendarClock className="size-4 text-purple-400" />,
+        value: "Bills/Links",
+        onSelect: openRequests,
+      },
+      {
+        label: "Cash Flow & Budgets",
+        icon: <PieChart className="size-4 text-[#00D632]" />,
+        value: "Forecast",
+        onSelect: openCashFlow,
+      },
+      {
+        label: "Security PIN & KYC",
+        icon: <Shield className="size-4 text-sky-400" />,
+        value: "PIN / MFA",
+        onSelect: openSecurity,
+      },
+      ...(isAdminOrStaff
+        ? [
+            {
+              label: "Admin Back Office",
+              icon: <ShieldAlert className="size-4 text-rose-400" />,
+              value: "Ops Console",
+              onSelect: openAdmin,
+            },
+          ]
+        : []),
+    ],
+    [openBankCard, openAddFunds, openPassbook, openPockets, openGoals, openRequests, openCashFlow, openSecurity, openAdmin, isAdminOrStaff]
+  );
+
+  const handleNavClick = React.useCallback(
+    (key: string) => {
+      setActiveNav(key);
+      if (key === "transfers") {
+        openUpi();
+      } else if (key === "bank-card") {
+        openBankCard("card");
+      } else if (key === "add-balance") {
+        openAddFunds();
+      } else if (key === "passbook") {
+        openPassbook();
+      } else if (key === "pockets") {
+        openPockets("view");
+      } else if (key === "goals") {
+        openGoals("view");
+      } else if (key === "requests") {
+        openRequests();
+      } else if (key === "cashflow") {
+        openCashFlow();
+      } else if (key === "security") {
+        openSecurity();
+      } else if (key === "admin") {
+        openAdmin();
+      }
+    },
+    [openUpi, openBankCard, openAddFunds, openPassbook, openPockets, openGoals, openRequests, openCashFlow, openSecurity, openAdmin]
+  );
 
   return (
     <SidebarProvider defaultOpen={true}>
@@ -226,7 +347,6 @@ export function DashboardHome() {
           collapsible="icon"
           className="border-r border-white/10 bg-zinc-950/85 backdrop-blur-2xl transition-all"
         >
-          {/* Sidebar Header Brand */}
           <SidebarHeader className="p-4 group-data-[collapsible=icon]:p-2 group-data-[collapsible=icon]:py-3.5 border-b border-white/10">
             <div className="flex items-center gap-3 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0">
               <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[#00D632] text-black font-extrabold text-lg shadow-lg shadow-[#00D632]/25">
@@ -241,7 +361,6 @@ export function DashboardHome() {
             </div>
           </SidebarHeader>
 
-          {/* Sidebar Navigation Links */}
           <SidebarContent className="px-2 py-4 group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:py-2">
             <SidebarGroup>
               <SidebarGroupLabel className="text-[11px] font-semibold text-zinc-400 tracking-wider uppercase px-2 mb-2 group-data-[collapsible=icon]:hidden">
@@ -264,6 +383,7 @@ export function DashboardHome() {
                   <SidebarMenuButton
                     isActive={activeNav === "transfers"}
                     onClick={() => handleNavClick("transfers")}
+                    onMouseEnter={() => void loadUPIModal()}
                     tooltip="Pay via UPI"
                     className="cursor-pointer"
                   >
@@ -276,6 +396,7 @@ export function DashboardHome() {
                   <SidebarMenuButton
                     isActive={activeNav === "bank-card"}
                     onClick={() => handleNavClick("bank-card")}
+                    onMouseEnter={() => void loadBankCardModal()}
                     tooltip="Bank & Card Pay"
                     className="cursor-pointer"
                   >
@@ -288,6 +409,7 @@ export function DashboardHome() {
                   <SidebarMenuButton
                     isActive={activeNav === "add-balance"}
                     onClick={() => handleNavClick("add-balance")}
+                    onMouseEnter={() => void loadAddBalanceModal()}
                     tooltip="Add Balance"
                     className="cursor-pointer"
                   >
@@ -300,6 +422,7 @@ export function DashboardHome() {
                   <SidebarMenuButton
                     isActive={activeNav === "passbook"}
                     onClick={() => handleNavClick("passbook")}
+                    onMouseEnter={() => void loadPassbookModal()}
                     tooltip="Passbook"
                     className="cursor-pointer"
                   >
@@ -312,6 +435,7 @@ export function DashboardHome() {
                   <SidebarMenuButton
                     isActive={activeNav === "pockets"}
                     onClick={() => handleNavClick("pockets")}
+                    onMouseEnter={() => void loadPocketsModal()}
                     tooltip="Smart Pockets"
                     className="cursor-pointer"
                   >
@@ -324,6 +448,7 @@ export function DashboardHome() {
                   <SidebarMenuButton
                     isActive={activeNav === "goals"}
                     onClick={() => handleNavClick("goals")}
+                    onMouseEnter={() => void loadVaultModal()}
                     tooltip="Savings Vault"
                     className="cursor-pointer"
                   >
@@ -331,11 +456,64 @@ export function DashboardHome() {
                     <span>Savings Vault</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={activeNav === "requests"}
+                    onClick={() => handleNavClick("requests")}
+                    onMouseEnter={() => void loadRequestsAutopayModal()}
+                    tooltip="Requests, Split & Autopay"
+                    className="cursor-pointer"
+                  >
+                    <CalendarClock className="size-[18px] shrink-0 text-purple-400" />
+                    <span>Requests & Autopay</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={activeNav === "cashflow"}
+                    onClick={() => handleNavClick("cashflow")}
+                    onMouseEnter={() => void loadCashFlowModal()}
+                    tooltip="Cash Flow & Budgets"
+                    className="cursor-pointer"
+                  >
+                    <PieChart className="size-[18px] shrink-0 text-[#00D632]" />
+                    <span>Cash Flow & Budgets</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={activeNav === "security"}
+                    onClick={() => handleNavClick("security")}
+                    onMouseEnter={() => void loadSecurityModal()}
+                    tooltip="Security PIN & Ledger"
+                    className="cursor-pointer"
+                  >
+                    <Shield className="size-[18px] shrink-0 text-sky-400" />
+                    <span>Security & PIN</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+
+                {isAdminOrStaff && (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={activeNav === "admin"}
+                      onClick={() => handleNavClick("admin")}
+                      onMouseEnter={() => void loadAdminModal()}
+                      tooltip="Admin Back Office"
+                      className="cursor-pointer"
+                    >
+                      <ShieldAlert className="size-[18px] shrink-0 text-amber-400" />
+                      <span>Back Office</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )}
               </SidebarMenu>
             </SidebarGroup>
           </SidebarContent>
 
-          {/* Sidebar Footer with Sign Out */}
           <SidebarFooter className="p-3 group-data-[collapsible=icon]:p-2 group-data-[collapsible=icon]:py-3 border-t border-white/10">
             <SidebarMenu>
               <SidebarMenuItem>
@@ -354,9 +532,7 @@ export function DashboardHome() {
 
         {/* Main Content Area */}
         <SidebarInset className="flex flex-1 flex-col bg-black overflow-y-auto overflow-x-hidden min-w-0">
-          {/* Header Bar */}
           <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-black/85 px-3 sm:px-4 md:px-8 backdrop-blur-2xl">
-            {/* Left section: Toggle & Greeting */}
             <div className="flex items-center gap-3">
               <SidebarTrigger className="text-zinc-400 hover:text-white hover:bg-white/10 p-2 rounded-xl transition-colors cursor-pointer" />
               <div className="hidden sm:block">
@@ -369,44 +545,43 @@ export function DashboardHome() {
               </div>
             </div>
 
-            {/* Right section: Quick actions, notifications, and Kokonut UI AccountMenu */}
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* Quick UPI Pay Button */}
               <button
                 type="button"
-                onClick={() => setUpiModalOpen(true)}
+                onClick={openUpi}
+                onMouseEnter={() => void loadUPIModal()}
                 className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#00D632] hover:bg-[#00D632]/90 text-black text-xs font-semibold shadow-md shadow-[#00D632]/20 transition-all cursor-pointer active:scale-95"
               >
                 <ArrowUpRight className="size-3.5 stroke-[2.5]" />
                 <span>Pay via UPI</span>
               </button>
 
-              {/* Quick Bank/Card Transfer Button */}
               <button
                 type="button"
-                onClick={() => {
-                  setBankModalTab("card");
-                  setBankModalOpen(true);
-                }}
+                onClick={() => openBankCard("card")}
+                onMouseEnter={() => void loadBankCardModal()}
                 className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-white/15 bg-zinc-900/80 hover:bg-zinc-800 text-white text-xs font-medium transition-all cursor-pointer active:scale-95"
               >
                 <CreditCard className="size-3.5 text-purple-400" />
                 <span>Bank / Card Pay</span>
               </button>
 
-              {/* Notification Bell with unread dot & dropdown */}
               <div className="relative">
                 <button
                   type="button"
                   aria-label="View notifications"
-                  onClick={() => setNotificationsOpen(!notificationsOpen)}
+                  onClick={() => setNotificationsOpen((prev) => !prev)}
+                  onMouseEnter={() => void loadNotificationStack()}
                   className="relative flex size-9 items-center justify-center rounded-full border border-white/15 bg-zinc-900/80 text-zinc-300 hover:text-white hover:bg-white/10 backdrop-blur-md transition-all cursor-pointer shadow-sm"
                 >
                   <Bell className="size-4" />
-                  <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-[#00D632] ring-2 ring-black" />
+                  {unreadNotificationsCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#00D632] text-[10px] font-mono font-extrabold text-black flex items-center justify-center ring-2 ring-black">
+                      {unreadNotificationsCount > 9 ? "9+" : unreadNotificationsCount}
+                    </span>
+                  )}
                 </button>
 
-                {/* Notifications Dropdown Panel (Responsive: fixed full-width ribbon on mobile, anchored on desktop) */}
                 {notificationsOpen && (
                   <>
                     <div
@@ -428,76 +603,33 @@ export function DashboardHome() {
                         </button>
                       </div>
 
-                      <NotificationStack />
+                      <React.Suspense
+                        fallback={
+                          <div className="space-y-2 py-2">
+                            <Skeleton className="h-16 w-full rounded-2xl" />
+                            <Skeleton className="h-16 w-full rounded-2xl" />
+                          </div>
+                        }
+                      >
+                        <NotificationStack />
+                      </React.Suspense>
                     </div>
                   </>
                 )}
               </div>
 
-              {/* Kokonut UI AccountMenu: Combined with 3D CardFlip QR modal */}
               <ProfileDropdown
                 accounts={[userAccount]}
                 defaultAccountId={userAccount.id}
                 onOpenQR={() => setProfileModalOpen(true)}
-                onSignOut={() => signOutUser()}
+                onSignOut={signOutUser}
                 holdDuration={900}
-                items={[
-                  {
-                    label: "My UPI QR & ID Card",
-                    icon: <Zap className="size-4 text-[#00D632]" />,
-                    value: "3D Flip",
-                    onSelect: () => setProfileModalOpen(true),
-                  },
-                  {
-                    label: "Bank & Card Transfers",
-                    icon: <CreditCard className="size-4 text-purple-400" />,
-                    value: "IMPS/NEFT",
-                    onSelect: () => {
-                      setBankModalTab("card");
-                      setBankModalOpen(true);
-                    },
-                  },
-                  {
-                    label: "Add Wallet Balance",
-                    icon: <Plus className="size-4 text-[#00D632]" />,
-                    value: "Cards/UPI",
-                    onSelect: () => setAddFundsModalOpen(true),
-                  },
-                  {
-                    label: "Passbook & Ledger",
-                    icon: <History className="size-4 text-amber-400" />,
-                    value: "Statement",
-                    onSelect: () => {
-                      setPassbookInitialTxnId(null);
-                      setPassbookModalOpen(true);
-                    },
-                  },
-                  {
-                    label: "Smart Pockets",
-                    icon: <FolderHeart className="size-4 text-rose-400" />,
-                    value: "Buckets",
-                    onSelect: () => {
-                      setPocketsModalMode("view");
-                      setPocketsModalOpen(true);
-                    },
-                  },
-                  {
-                    label: "Savings Vault",
-                    icon: <Target className="size-4 text-amber-400" />,
-                    value: "3.2% p.a.",
-                    onSelect: () => {
-                      setVaultModalMode("view");
-                      setVaultModalOpen(true);
-                    },
-                  },
-                ]}
+                items={profileMenuItems}
               />
             </div>
           </header>
 
-          {/* Main Content: Kokonut UI WidgetGrid */}
           <main className="flex-1 p-3 sm:p-4 md:p-6 lg:p-8 max-w-7xl w-full mx-auto overflow-x-hidden">
-            {/* Page Sub-header */}
             <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div>
                 <h2 className="font-display text-2xl font-bold tracking-tight text-white">
@@ -505,17 +637,23 @@ export function DashboardHome() {
                 </h2>
               </div>
 
-              <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <button
+                type="button"
+                onClick={() => setComplianceModalOpen(true)}
+                onMouseEnter={() => void loadComplianceDialog()}
+                className="flex items-center gap-2 text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
                 <span className="flex size-2 rounded-full bg-[#00D632]" />
-                <span className="font-mono text-[11px]">NPCI 24x7 FastUPI Live</span>
-              </div>
+                <span className="font-mono text-[11px] underline underline-offset-2 decoration-white/20">
+                  Simulation · No Real Money · Disclosure
+                </span>
+              </button>
             </div>
 
-            {/* Widget Grid Container */}
             <div className="w-full">
               <WidgetGrid
                 items={dashboardWidgets}
-                defaultLayout={initialLayout}
+                defaultLayout={INITIAL_LAYOUT}
                 rowHeight={260}
                 className="max-w-none"
               />
@@ -523,47 +661,104 @@ export function DashboardHome() {
           </main>
         </SidebarInset>
 
-        {/* Modal: Pay via UPI with AmountPad */}
-        <UPIPaymentModal
-          open={upiModalOpen}
-          onClose={() => setUpiModalOpen(false)}
-        />
+        {/* Lazy-loaded Modals (only loaded when opened) */}
+        {upiModalOpen && (
+          <React.Suspense fallback={<ModalLoadingFallback />}>
+            <UPIPaymentModal open={upiModalOpen} onClose={() => setUpiModalOpen(false)} />
+          </React.Suspense>
+        )}
 
-        {/* Modal: Direct Bank Account & Card Number Transfer with Swipe to Confirm */}
-        <BankCardTransferModal
-          open={bankModalOpen}
-          onClose={() => setBankModalOpen(false)}
-          defaultTab={bankModalTab}
-        />
+        {bankModalOpen && (
+          <React.Suspense fallback={<ModalLoadingFallback />}>
+            <BankCardTransferModal
+              open={bankModalOpen}
+              onClose={() => setBankModalOpen(false)}
+              defaultTab={bankModalTab}
+            />
+          </React.Suspense>
+        )}
 
-        {/* Modal: Add Balance with FieldDemo Form */}
-        <AddBalanceModal
-          open={addFundsModalOpen}
-          onClose={() => setAddFundsModalOpen(false)}
-        />
+        {addFundsModalOpen && (
+          <React.Suspense fallback={<ModalLoadingFallback />}>
+            <AddBalanceModal open={addFundsModalOpen} onClose={() => setAddFundsModalOpen(false)} />
+          </React.Suspense>
+        )}
 
-        {/* Modal: Interactive Passbook Ledger */}
-        <PassbookModal
-          open={passbookModalOpen}
-          onClose={() => setPassbookModalOpen(false)}
-          initialTransactionId={passbookInitialTxnId}
-        />
+        {passbookModalOpen && (
+          <React.Suspense fallback={<ModalLoadingFallback />}>
+            <PassbookModal
+              open={passbookModalOpen}
+              onClose={() => setPassbookModalOpen(false)}
+              initialTransactionId={passbookInitialTxnId}
+            />
+          </React.Suspense>
+        )}
 
-        {/* Modal: Smart Pockets Manager */}
-        <PocketsManagerModal
-          open={pocketsModalOpen}
-          onClose={() => setPocketsModalOpen(false)}
-          defaultMode={pocketsModalMode}
-        />
+        {pocketsModalOpen && (
+          <React.Suspense fallback={<ModalLoadingFallback />}>
+            <PocketsManagerModal
+              open={pocketsModalOpen}
+              onClose={() => setPocketsModalOpen(false)}
+              defaultMode={pocketsModalMode}
+            />
+          </React.Suspense>
+        )}
 
-        {/* Modal: Savings Vault & Goals Manager */}
-        <SavingsVaultModal
-          open={vaultModalOpen}
-          onClose={() => setVaultModalOpen(false)}
-          defaultMode={vaultModalMode}
-        />
+        {vaultModalOpen && (
+          <React.Suspense fallback={<ModalLoadingFallback />}>
+            <SavingsVaultModal
+              open={vaultModalOpen}
+              onClose={() => setVaultModalOpen(false)}
+              defaultMode={vaultModalMode}
+            />
+          </React.Suspense>
+        )}
 
-        {/* Modal: Personal Profile & QR 3D CardFlip (triggered from Account Menu) */}
+        {securityModalOpen && (
+          <React.Suspense fallback={<ModalLoadingFallback />}>
+            <SecurityPinModal
+              open={securityModalOpen}
+              onClose={() => setSecurityModalOpen(false)}
+            />
+          </React.Suspense>
+        )}
+
+        {isAdminOrStaff && adminModalOpen && (
+          <React.Suspense fallback={<ModalLoadingFallback />}>
+            <AdminBackOfficeModal
+              open={adminModalOpen}
+              onClose={() => setAdminModalOpen(false)}
+            />
+          </React.Suspense>
+        )}
+
+        {cashFlowModalOpen && (
+          <React.Suspense fallback={<ModalLoadingFallback />}>
+            <CashFlowBudgetsModal
+              open={cashFlowModalOpen}
+              onClose={() => setCashFlowModalOpen(false)}
+            />
+          </React.Suspense>
+        )}
+
+        {requestsModalOpen && (
+          <React.Suspense fallback={<ModalLoadingFallback />}>
+            <RequestsAutopayModal
+              open={requestsModalOpen}
+              onClose={() => setRequestsModalOpen(false)}
+            />
+          </React.Suspense>
+        )}
+
+        {complianceModalOpen && (
+          <React.Suspense fallback={<ModalLoadingFallback />}>
+            <ComplianceDialog
+              open={complianceModalOpen}
+              onClose={() => setComplianceModalOpen(false)}
+            />
+          </React.Suspense>
+        )}
+
         {profileModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div
@@ -578,12 +773,13 @@ export function DashboardHome() {
               >
                 <X className="size-4" />
               </button>
-              <ProfileQRCard isModal={true} />
+              <React.Suspense fallback={<Skeleton className="w-80 h-96 rounded-3xl" />}>
+                <ProfileQRCard isModal={true} />
+              </React.Suspense>
             </div>
           </div>
         )}
 
-        {/* Sign Out Confirmation Dialog */}
         <AlertDialog open={signOutDialogOpen} onOpenChange={setSignOutDialogOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>

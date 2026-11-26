@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { CreditCard, Building2, ArrowRight, ShieldCheck } from "lucide-react";
 import { formatINR } from "@/utils/formatters";
 import { useWallet } from "@/context/WalletContext";
@@ -9,7 +10,7 @@ interface BankCardQuickTileProps {
   onOpenBankTransfer: () => void;
 }
 
-export function BankCardQuickTile({
+export const BankCardQuickTile = React.memo(function BankCardQuickTile({
   onOpenCardTransfer,
   onOpenBankTransfer,
 }: BankCardQuickTileProps) {
@@ -85,4 +86,4 @@ export function BankCardQuickTile({
       </div>
     </div>
   );
-}
+});

@@ -14,10 +14,18 @@ import {
   ArrowLeft,
   QrCode,
   Wallet,
+  Lock,
+  Star,
+  AlertTriangle,
+  Sparkles,
 } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 import { formatINR } from "@/utils/formatters";
 import { SlideToConfirm } from "@/components/kokonutui/SlideToConfirm";
+import { useDebounce } from "@/hooks/use-debounce";
+import { generateIdempotencyKey } from "@/lib/cache";
+import { DirectoryProfile, TransferQuote } from "@/types/database.types";
+import { ContactsGridSkeleton } from "@/components/dashboard/DashboardSkeleton";
 
 interface UPIPaymentModalProps {
   open: boolean;
@@ -31,7 +39,6 @@ export interface Recipient {
   type: "store" | "person";
 }
 
-// Color palette matching the uploaded photo (Warm Amber, Cyan, Purple, Emerald, Rose)
 const AVATAR_GRADIENTS = [
   "from-amber-500 to-orange-600",
   "from-cyan-400 to-sky-600",
@@ -45,13 +52,10 @@ function getAvatarColor(name: string) {
   for (let i = 0; i < name.length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
-  const index = Math.abs(hash) % AVATAR_GRADIENTS.length;
-  return AVATAR_GRADIENTS[index];
+  return AVATAR_GRADIENTS[Math.abs(hash) % AVATAR_GRADIENTS.length];
 }
 
-// Complete default directory including the contacts from the user's uploaded screenshot & database seed
 const ALL_SEED_CONTACTS: Recipient[] = [
-  // User's screenshot contacts
   { name: "Chewang Lepcha", handle: "chewang@cash", phone: "+91 9811234001", type: "person" },
   { name: "Alif Sufee", handle: "alif@cash", phone: "+91 9811234002", type: "person" },
   { name: "Anand Kumar Singh", handle: "anand@cash", phone: "+91 9811234003", type: "person" },
@@ -73,8 +77,6 @@ const ALL_SEED_CONTACTS: Recipient[] = [
   { name: "Govind Ray", handle: "govind@cash", phone: "+91 9811234019", type: "person" },
   { name: "Nabin Mondal", handle: "nabin@cash", phone: "+91 9811234020", type: "person" },
   { name: "Bibek Limbu", handle: "bibek@cash", phone: "+91 9811234021", type: "person" },
-
-  // Database Seed and Example accounts
   { name: "Aarav Sharma", handle: "aarav@cash", phone: "+91 9786579303", type: "person" },
   { name: "Aditi Verma", handle: "aditi@cash", phone: "+91 9271432881", type: "person" },
   { name: "Akash Patel", handle: "akash@cash", phone: "+91 9185675980", type: "person" },
@@ -95,114 +97,236 @@ const ALL_SEED_CONTACTS: Recipient[] = [
   { name: "Blue Tokai Coffee", handle: "bluetokai@paytm", phone: "+91 9800000002", type: "store" },
 ];
 
-export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
-  const { currentWallet, sendMoney, profiles } = useWallet();
+function mapProfilesToRecipients(
+  profiles: DirectoryProfile[],
+  currentUserId?: string
+): Recipient[] {
+  return [...profiles]
+    .filter(
+      (p) =>
+        p.id !== currentUserId &&
+        !p.full_name?.toLowerCase().includes("legacy") &&
+        !p.email?.toLowerCase().includes("legacy")
+    )
+    .sort((a, b) => {
+      const aPriority = a.email?.endsWith("@cash.me") ? 1 : 2;
+      const bPriority = b.email?.endsWith("@cash.me") ? 1 : 2;
+      return aPriority - bPriority;
+    })
+    .map((p) => {
+      const key = p.full_name.toLowerCase().trim();
+      const handle = p.email
+        ? p.email.endsWith("@cash.me") || p.email.endsWith("@cash.test")
+          ? `${p.email.split("@")[0]}@cash`
+          : p.email
+        : p.phone || `${key.replace(/\s+/g, "")}@cash`;
 
-  // Mobile navigation view: "contacts" list first, then "amount" pad
+      return {
+        name: p.full_name,
+        handle,
+        phone: p.phone || undefined,
+        type: "person" as const,
+      };
+    });
+}
+
+const DesktopContactButton = React.memo(function DesktopContactButton({
+  contact,
+  isSelected,
+  onSelect,
+}: {
+  contact: Recipient;
+  isSelected: boolean;
+  onSelect: (c: Recipient) => void;
+}) {
+  const gradient = getAvatarColor(contact.name);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(contact)}
+      className={`w-full flex items-center gap-2.5 p-2 rounded-xl text-left transition-all cursor-pointer ${
+        isSelected
+          ? "bg-[#00D632]/15 border border-[#00D632]/35 text-white shadow-sm"
+          : "hover:bg-white/5 border border-transparent text-zinc-300"
+      }`}
+    >
+      <div
+        className={`flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${gradient} text-xs font-bold text-white shadow-sm border border-white/15`}
+      >
+        {contact.name.charAt(0).toUpperCase()}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold truncate leading-tight text-zinc-100">{contact.name}</p>
+        <p className="text-[10px] text-zinc-400 font-mono truncate">{contact.handle}</p>
+      </div>
+    </button>
+  );
+});
+
+export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
+  const {
+    currentWallet,
+    sendMoney,
+    profiles,
+    searchDirectoryUsers,
+    securityStatus,
+    payees,
+    previewTransferQuote,
+    upsertPayee,
+    claimCashback,
+  } = useWallet();
+
   const [mobileView, setMobileView] = React.useState<"contacts" | "amount">("contacts");
   const [searchQuery, setSearchQuery] = React.useState("");
+  const debouncedSearch = useDebounce(searchQuery, 250);
+  const [remoteMatches, setRemoteMatches] = React.useState<DirectoryProfile[]>([]);
+  const [isSearchingRemote, setIsSearchingRemote] = React.useState(false);
 
-  // Merge database profiles with all known contacts dynamically
+  // Trigger debounced server-side directory autocomplete when user types 2+ characters
+  React.useEffect(() => {
+    const trimmed = debouncedSearch.trim();
+    if (!open || trimmed.length < 2) {
+      setRemoteMatches([]);
+      setIsSearchingRemote(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSearchingRemote(true);
+
+    searchDirectoryUsers(trimmed)
+      .then((res) => {
+        if (!cancelled) {
+          setRemoteMatches(res);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsSearchingRemote(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSearch, open, searchDirectoryUsers]);
+
   const allContacts = React.useMemo<Recipient[]>(() => {
     const list: Recipient[] = [];
     const seen = new Set<string>();
 
-    // 1. Add database profiles first (prioritize active @cash.me users, exclude legacy)
-    if (profiles && profiles.length > 0) {
-      const sorted = [...profiles]
-        .filter(
-          (p) =>
-            p.id !== currentWallet?.user_id &&
-            !p.full_name?.toLowerCase().includes("legacy") &&
-            !p.email?.toLowerCase().includes("legacy")
-        )
-        .sort((a, b) => {
-          const aPriority = a.email?.endsWith("@cash.me") ? 1 : 2;
-          const bPriority = b.email?.endsWith("@cash.me") ? 1 : 2;
-          return aPriority - bPriority;
-        });
-
-      sorted.forEach((p) => {
-        const key = p.full_name.toLowerCase().trim();
+    const addUnique = (items: Recipient[]) => {
+      for (const item of items) {
+        const key = item.name.toLowerCase().trim();
         if (!seen.has(key)) {
           seen.add(key);
-          const handle = p.email
-            ? p.email.endsWith("@cash.me") || p.email.endsWith("@cash.test")
-              ? `${p.email.split("@")[0]}@cash`
-              : p.email
-            : p.phone || `${key.replace(/\s+/g, "")}@cash`;
-
-          list.push({
-            name: p.full_name,
-            handle,
-            phone: p.phone || undefined,
-            type: "person",
-          });
+          list.push(item);
         }
-      });
-    }
-
-    // 2. Add all default & screenshot contacts
-    ALL_SEED_CONTACTS.forEach((c) => {
-      const key = c.name.toLowerCase().trim();
-      if (!seen.has(key)) {
-        seen.add(key);
-        list.push(c);
       }
-    });
+    };
+
+    if (remoteMatches.length > 0) {
+      addUnique(mapProfilesToRecipients(remoteMatches, currentWallet?.user_id));
+    }
+    if (profiles.length > 0) {
+      addUnique(mapProfilesToRecipients(profiles, currentWallet?.user_id));
+    }
+    addUnique(ALL_SEED_CONTACTS);
 
     return list;
-  }, [profiles, currentWallet?.user_id]);
+  }, [remoteMatches, profiles, currentWallet?.user_id]);
 
-  // Real-time live filtering by name, UPI ID, or phone number
   const filteredContacts = React.useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
+    const q = debouncedSearch.toLowerCase().trim();
     if (!q) return allContacts;
+    const digitsOnly = q.replace(/\D/g, "");
     return allContacts.filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
         c.handle.toLowerCase().includes(q) ||
-        (c.phone && c.phone.replace(/\D/g, "").includes(q.replace(/\D/g, "")))
+        (digitsOnly.length > 0 && c.phone && c.phone.replace(/\D/g, "").includes(digitsOnly))
     );
-  }, [allContacts, searchQuery]);
+  }, [allContacts, debouncedSearch]);
 
   const [selectedRecipient, setSelectedRecipient] = React.useState<Recipient>(ALL_SEED_CONTACTS[0]);
   const [customVpa, setCustomVpa] = React.useState("");
   const [isCustom, setIsCustom] = React.useState(false);
 
-  React.useEffect(() => {
-    if (open) {
-      setMobileView("contacts");
-      setSearchQuery("");
-      setTallyItems([]);
-      setCurrentBuffer("");
-      setStatusMessage(null);
-      setIsSuccess(false);
-      if (allContacts.length > 0) {
-        setSelectedRecipient(allContacts[0]);
-        setIsCustom(false);
-      }
-    }
-  }, [open, allContacts]);
-
-  // Shop Calculator & Itemized Tally state
   const [tallyItems, setTallyItems] = React.useState<number[]>([]);
   const [currentBuffer, setCurrentBuffer] = React.useState<string>("");
   const [statusMessage, setStatusMessage] = React.useState<string | null>(null);
   const [isSuccess, setIsSuccess] = React.useState(false);
+  const [transactionPin, setTransactionPin] = React.useState("");
+  const [pinPromptRequested, setPinPromptRequested] = React.useState(false);
+  const [quote, setQuote] = React.useState<TransferQuote | null>(null);
+  const [lastTxnId, setLastTxnId] = React.useState<string | null>(null);
+  const [cashbackClaimed, setCashbackClaimed] = React.useState(false);
+  const [payeeSavedMsg, setPayeeSavedMsg] = React.useState(false);
+  const paymentAttemptKeyRef = React.useRef<string>(generateIdempotencyKey());
 
-  if (!open) return null;
+  // Reset modal only when opening (never reset mid-search when allContacts updates)
+  const wasOpenRef = React.useRef(false);
+  React.useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      setMobileView("contacts");
+      setSearchQuery("");
+      setRemoteMatches([]);
+      setTallyItems([]);
+      setCurrentBuffer("");
+      setStatusMessage(null);
+      setIsSuccess(false);
+      setIsCustom(false);
+      setTransactionPin("");
+      setPinPromptRequested(false);
+      setQuote(null);
+      setLastTxnId(null);
+      setCashbackClaimed(false);
+      setPayeeSavedMsg(false);
+      paymentAttemptKeyRef.current = generateIdempotencyKey();
+      if (allContacts.length > 0) {
+        setSelectedRecipient(allContacts[0]);
+      }
+    }
+    wasOpenRef.current = open;
+  }, [open, allContacts]);
 
-  // Calculate live total: sum of committed tally items + current buffer
+  const handleSelectDesktopRecipient = React.useCallback((c: Recipient) => {
+    setSelectedRecipient(c);
+    setIsCustom(false);
+    setTransactionPin("");
+    setPinPromptRequested(false);
+    setPayeeSavedMsg(false);
+    paymentAttemptKeyRef.current = generateIdempotencyKey();
+  }, []);
+
   const committedSum = tallyItems.reduce((acc, curr) => acc + curr, 0);
   const currentNum = parseFloat(currentBuffer) || 0;
   const totalAmount = committedSum + currentNum;
+  const activeRecipientHandle =
+    isCustom && customVpa.trim() ? customVpa.trim() : selectedRecipient.handle;
 
-  const activeRecipient = isCustom && customVpa.trim()
-    ? { name: customVpa.trim(), handle: customVpa.trim(), type: "person" as const }
-    : selectedRecipient;
+  React.useEffect(() => {
+    if (!open || totalAmount <= 0 || !activeRecipientHandle) {
+      setQuote(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void previewTransferQuote(activeRecipientHandle, totalAmount, "upi").then(setQuote);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [open, totalAmount, activeRecipientHandle, previewTransferQuote]);
 
-  // Keypad actions
+  if (!open) return null;
+  const pinThreshold = securityStatus?.pin_threshold ?? 2000;
+  const needsPinInput =
+    Boolean(securityStatus?.has_pin) && (pinPromptRequested || totalAmount >= pinThreshold);
+
+  const activeRecipient =
+    isCustom && customVpa.trim()
+      ? { name: customVpa.trim(), handle: customVpa.trim(), type: "person" as const }
+      : selectedRecipient;
+
   const handleDigit = (digit: string) => {
     if (digit === "." && currentBuffer.includes(".")) return;
     if (currentBuffer.length >= 7) return;
@@ -235,21 +359,25 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
     setTallyItems((prev) => [...prev, val]);
   };
 
-  // Select contact and transition to amount screen
   const handleSelectContact = (recipient: Recipient) => {
     setSelectedRecipient(recipient);
     setIsCustom(false);
+    setTransactionPin("");
+    setPinPromptRequested(false);
     setMobileView("amount");
+    paymentAttemptKeyRef.current = generateIdempotencyKey();
   };
 
   const handlePayCustomSearch = () => {
     if (!searchQuery.trim()) return;
     setCustomVpa(searchQuery.trim());
     setIsCustom(true);
+    setTransactionPin("");
+    setPinPromptRequested(false);
     setMobileView("amount");
+    paymentAttemptKeyRef.current = generateIdempotencyKey();
   };
 
-  // Payment Execution
   const handleExecutePayment = async () => {
     if (totalAmount <= 0) {
       setStatusMessage("Please enter an amount to pay");
@@ -261,9 +389,8 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
       return;
     }
 
-    const itemsSummary = tallyItems.length > 0
-      ? ` (${tallyItems.length + (currentNum > 0 ? 1 : 0)} items shop tally)`
-      : "";
+    const itemsSummary =
+      tallyItems.length > 0 ? ` (${tallyItems.length + (currentNum > 0 ? 1 : 0)} items shop tally)` : "";
 
     const res = await sendMoney({
       recipientUpiOrPhone: activeRecipient.handle,
@@ -271,32 +398,47 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
       amount: Number(totalAmount.toFixed(2)),
       category: "peer_transfer",
       description: `Payment to ${activeRecipient.name}${itemsSummary}`,
+      pin: transactionPin || undefined,
+      idempotencyKey: paymentAttemptKeyRef.current,
     });
 
     if (res.success) {
       setIsSuccess(true);
+      setLastTxnId(res.transactionId || null);
+      setTransactionPin("");
+      setPinPromptRequested(false);
+      paymentAttemptKeyRef.current = generateIdempotencyKey();
       const recipientLabel = res.recipientName || activeRecipient.name;
       const internalText = res.isInternal ? " · Receiver Credited ✓" : "";
       setStatusMessage(`Paid ${formatINR(totalAmount)} to ${recipientLabel}${internalText}`);
-      setTimeout(() => {
-        onClose();
-      }, 1800);
+      if (!quote || quote.cashback_rate <= 0) {
+        window.setTimeout(() => {
+          onClose();
+        }, 1800);
+      }
     } else {
-      setStatusMessage(res.error || "Payment failed");
+      if (res.pinRequired) {
+        setPinPromptRequested(true);
+      }
+      const errText = res.error || "Payment failed";
+      if (errText.toLowerCase().includes("timed out")) {
+        setStatusMessage(
+          `Network timeout (Ref key ${paymentAttemptKeyRef.current.slice(0, 8)} preserved). Retry safely — idempotency prevents double debit.`
+        );
+      } else {
+        setStatusMessage(errText);
+      }
     }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
-      {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/75 backdrop-blur-md animate-in fade-in-0 duration-200"
         onClick={onClose}
       />
 
-      {/* Main Dialog Modal */}
       <div className="relative z-50 flex flex-col md:flex-row gap-4 items-stretch max-w-3xl w-full max-h-[92vh] overflow-hidden rounded-3xl border border-white/20 bg-zinc-950/95 p-4 sm:p-6 text-zinc-100 shadow-[0_25px_60px_rgba(0,0,0,0.9),inset_0_1px_1px_rgba(255,255,255,0.22)] backdrop-blur-2xl animate-in zoom-in-95">
-        {/* Global Modal Close Button (Desktop) */}
         <button
           type="button"
           onClick={onClose}
@@ -306,11 +448,8 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
           <X className="size-4" />
         </button>
 
-        {/* ========================================================================= */}
-        {/* MOBILE VIEW 1: "Send Money" Contacts Selection Screen (Matches User Image)*/}
-        {/* ========================================================================= */}
+        {/* MOBILE VIEW: Contacts Selection */}
         <div className={`flex-1 flex flex-col md:hidden overflow-hidden ${mobileView === "contacts" ? "flex" : "hidden"}`}>
-          {/* Top Navigation Header */}
           <div className="flex items-center justify-between pb-3 border-b border-white/10 shrink-0">
             <button
               type="button"
@@ -321,16 +460,11 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
               <X className="size-5" />
             </button>
 
-            <h3 className="font-display font-bold text-base text-white tracking-tight">
-              Send Money
-            </h3>
+            <h3 className="font-display font-bold text-base text-white tracking-tight">Send Money</h3>
 
             <button
               type="button"
-              onClick={() => {
-                // Pre-fill scanner contact for quick simulated QR scan
-                handleSelectContact(allContacts[0]);
-              }}
+              onClick={() => handleSelectContact(allContacts[0])}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-[11px] font-medium text-zinc-200 cursor-pointer active:scale-95 transition-all"
             >
               <QrCode className="size-3.5 text-[#00D632]" />
@@ -338,7 +472,6 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
             </button>
           </div>
 
-          {/* Search Input Bar (Matches Photo: "Enter Mobile Number") */}
           <div className="mt-3 shrink-0">
             <div className="relative flex items-center">
               <Search className="absolute left-3.5 size-4 text-zinc-400 pointer-events-none" />
@@ -360,7 +493,6 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
               )}
             </div>
 
-            {/* Custom Pay Prompt if user typed something not directly in list */}
             {searchQuery.trim().length > 2 && (
               <button
                 type="button"
@@ -373,18 +505,19 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
             )}
           </div>
 
-          {/* Contacts Section: 4-Column Avatar Grid matching screenshot */}
           <div className="flex-1 overflow-y-auto mt-4 pr-1 scrollbar-thin">
             <div className="flex items-center justify-between mb-3 px-1">
               <p className="text-[11px] font-bold text-zinc-400 tracking-wider uppercase font-mono">
-                {searchQuery ? `Search Results (${filteredContacts.length})` : "Recent Contacts"}
+                {debouncedSearch ? `Search Results (${filteredContacts.length})` : "Recent Contacts"}
               </p>
               <span className="text-[10px] text-zinc-500 font-mono">
-                {allContacts.length} verified accounts
+                {isSearchingRemote ? "Searching..." : `${allContacts.length} verified accounts`}
               </span>
             </div>
 
-            {filteredContacts.length === 0 ? (
+            {isSearchingRemote && filteredContacts.length === 0 ? (
+              <ContactsGridSkeleton count={8} />
+            ) : filteredContacts.length === 0 ? (
               <div className="py-12 text-center">
                 <p className="text-sm text-zinc-400">No contact matched "{searchQuery}"</p>
                 <button
@@ -408,15 +541,12 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
                       onClick={() => handleSelectContact(c)}
                       className="group flex flex-col items-center text-center cursor-pointer active:scale-95 transition-transform"
                     >
-                      {/* Avatar Squircle with corner badge */}
                       <div className="relative">
                         <div
                           className={`size-14 sm:size-16 rounded-[18px] bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-extrabold text-xl shadow-lg border border-white/20 group-hover:scale-105 transition-transform`}
                         >
                           {initial}
                         </div>
-
-                        {/* Corner Icon Badge (Wallet / Store) */}
                         <span className="absolute -bottom-1 -right-1 flex size-5 items-center justify-center rounded-full bg-zinc-950 border border-white/20 shadow">
                           {c.type === "store" ? (
                             <Store className="size-2.5 text-[#00D632]" />
@@ -425,8 +555,6 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
                           )}
                         </span>
                       </div>
-
-                      {/* Contact Full Name below avatar */}
                       <span className="text-[11px] font-medium text-zinc-200 line-clamp-2 max-w-[70px] leading-tight mt-1.5 group-hover:text-white transition-colors">
                         {c.name}
                       </span>
@@ -438,23 +566,19 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
           </div>
         </div>
 
-        {/* ========================================================================= */}
-        {/* DESKTOP VIEW: Left Contacts Directory Sidebar with Live Search            */}
-        {/* ========================================================================= */}
+        {/* DESKTOP VIEW: Contacts Directory Sidebar */}
         <div className="hidden md:flex flex-col w-72 border-r border-white/10 pr-5 justify-between shrink-0">
           <div className="flex flex-col h-full overflow-hidden">
-            {/* Header */}
             <div className="flex items-center justify-between mb-3 text-white">
               <div className="flex items-center gap-2">
                 <Smartphone className="size-4 text-[#00D632]" />
                 <span className="font-bold text-sm tracking-tight">Send Money</span>
               </div>
               <span className="text-[10px] text-zinc-500 font-mono">
-                {allContacts.length} Contacts
+                {isSearchingRemote ? "Searching..." : `${allContacts.length} Contacts`}
               </span>
             </div>
 
-            {/* Desktop Search Bar */}
             <div className="relative flex items-center mb-3">
               <Search className="absolute left-3 size-3.5 text-zinc-400 pointer-events-none" />
               <input
@@ -475,41 +599,39 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
               )}
             </div>
 
-            {/* Scrollable Contacts List (All database + seed contacts) */}
             <div className="flex-1 overflow-y-auto pr-1 space-y-1 scrollbar-thin">
-              {filteredContacts.map((c) => {
-                const isSelected = !isCustom && selectedRecipient.handle === c.handle;
-                const gradient = getAvatarColor(c.name);
-
-                return (
-                  <button
-                    key={c.handle}
-                    type="button"
-                    onClick={() => {
-                      setSelectedRecipient(c);
-                      setIsCustom(false);
-                    }}
-                    className={`w-full flex items-center gap-2.5 p-2 rounded-xl text-left transition-all cursor-pointer ${
-                      isSelected
-                        ? "bg-[#00D632]/15 border border-[#00D632]/35 text-white shadow-sm"
-                        : "hover:bg-white/5 border border-transparent text-zinc-300"
-                    }`}
-                  >
-                    <div
-                      className={`flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${gradient} text-xs font-bold text-white shadow-sm border border-white/15`}
+              {payees.length > 0 && !debouncedSearch && (
+                <div className="mb-2 pb-2 border-b border-white/10">
+                  <p className="text-[10px] font-mono uppercase text-amber-300 px-1 mb-1">Saved Payees</p>
+                  {payees.slice(0, 4).map((py) => (
+                    <button
+                      key={py.id}
+                      type="button"
+                      onClick={() =>
+                        handleSelectDesktopRecipient({
+                          name: py.payee_name,
+                          handle: py.upi_id || py.payee_identifier,
+                          type: "person",
+                        })
+                      }
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-white/10 text-left text-xs cursor-pointer"
                     >
-                      {c.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold truncate leading-tight text-zinc-100">{c.name}</p>
-                      <p className="text-[10px] text-zinc-400 font-mono truncate">{c.handle}</p>
-                    </div>
-                  </button>
-                );
-              })}
+                      <span className="truncate text-zinc-200 font-medium">{py.payee_name}</span>
+                      {py.is_favourite && <Star className="size-3 text-amber-400 shrink-0" fill="currentColor" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {filteredContacts.map((c) => (
+                <DesktopContactButton
+                  key={c.handle}
+                  contact={c}
+                  isSelected={!isCustom && selectedRecipient.handle === c.handle}
+                  onSelect={handleSelectDesktopRecipient}
+                />
+              ))}
             </div>
 
-            {/* Custom VPA Input at bottom */}
             <div className="mt-3 pt-3 border-t border-white/10">
               <label className="text-[10px] text-zinc-400 block mb-1 font-mono uppercase">
                 Or Enter Custom UPI ID / Phone
@@ -528,19 +650,15 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
           </div>
         </div>
 
-        {/* ========================================================================= */}
-        {/* PAYMENT PAD VIEW: (Visible on Desktop always; Visible on Mobile in "amount")*/}
-        {/* ========================================================================= */}
+        {/* PAYMENT PAD VIEW */}
         <div
           className={`flex-1 flex flex-col justify-between overflow-y-auto ${
             mobileView === "amount" ? "flex" : "hidden md:flex"
           }`}
         >
           <div>
-            {/* Payee Banner with SAFE RIGHT PADDING so it NEVER bleeds into the close 'X' button */}
             <div className="flex items-center justify-between pb-2.5 border-b border-white/10 pr-10">
               <div className="flex items-center gap-2.5 min-w-0">
-                {/* On Mobile: Back button to return to contacts list */}
                 <button
                   type="button"
                   onClick={() => setMobileView("contacts")}
@@ -559,24 +677,35 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
                 </div>
 
                 <div className="min-w-0">
-                  <p className="text-xs font-bold text-white truncate leading-tight">
-                    {activeRecipient.name}
-                  </p>
-                  <p className="text-[10px] text-zinc-400 font-mono truncate">
-                    {activeRecipient.handle}
-                  </p>
+                  <p className="text-xs font-bold text-white truncate leading-tight">{activeRecipient.name}</p>
+                  <p className="text-[10px] text-zinc-400 font-mono truncate">{activeRecipient.handle}</p>
                 </div>
               </div>
 
-              {/* Safe, non-colliding balance badge */}
-              <div className="shrink-0 text-right">
+              <div className="shrink-0 flex items-center gap-1.5 text-right">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const r = await upsertPayee({
+                      payeeIdentifier: activeRecipient.handle,
+                      payeeName: activeRecipient.name,
+                      upiId: activeRecipient.handle,
+                      isFavourite: true,
+                    });
+                    if (r.success) setPayeeSavedMsg(true);
+                  }}
+                  className="text-[10px] text-amber-300 font-mono bg-amber-500/10 border border-amber-400/25 px-2 py-0.5 rounded-full hover:bg-amber-500/20 cursor-pointer flex items-center gap-1"
+                  title="Save to favourites (24h cooling-off applies)"
+                >
+                  <Star className="size-2.5" fill={payeeSavedMsg ? "currentColor" : "none"} />
+                  <span>{payeeSavedMsg ? "Saved" : "Save"}</span>
+                </button>
                 <span className="text-[10px] text-zinc-400 font-mono bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
                   Bal: {formatINR(currentWallet?.balance ?? 0)}
                 </span>
               </div>
             </div>
 
-            {/* Shop Itemized Tally Ribbon (Clutter text removed as requested) */}
             <div className="mt-2.5 min-h-[32px] flex items-center justify-between bg-zinc-900/60 rounded-xl px-3 py-1.5 border border-white/10">
               <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none text-[11px] font-mono text-zinc-300 flex-1">
                 <Receipt className="size-3.5 text-[#00D632] shrink-0" />
@@ -614,7 +743,6 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
               )}
             </div>
 
-            {/* Total Amount Display */}
             <div className="my-2.5 text-center py-2 bg-zinc-900/40 rounded-2xl border border-white/10">
               <span className="text-[10px] font-semibold tracking-wider uppercase text-zinc-400">
                 Total Transfer Amount
@@ -635,7 +763,6 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
               )}
             </div>
 
-            {/* Quick Add Presets Row */}
             <div className="flex items-center justify-center gap-1.5 mb-2.5 flex-wrap">
               {[50, 100, 200, 500, 1000].map((preset) => (
                 <button
@@ -649,7 +776,6 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
               ))}
             </div>
 
-            {/* Keypad Grid with Prominent '+' Button */}
             <div className="grid grid-cols-4 gap-1.5 max-w-sm mx-auto">
               {["1", "2", "3"].map((d) => (
                 <button
@@ -734,29 +860,104 @@ export function UPIPaymentModal({ open, onClose }: UPIPaymentModalProps) {
             </div>
           </div>
 
-          {/* Slide to Pay Slider + Status Confirmation */}
           <div className="mt-3 pt-3 border-t border-white/10 space-y-2">
+            {quote && totalAmount > 0 && (
+              <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] space-y-1">
+                <div className="flex items-center justify-between text-zinc-300 font-mono">
+                  <span>
+                    Fee: <strong className="text-[#00D632]">{formatINR(quote.fee_amount + quote.gst_amount)}</strong> ·{" "}
+                    Cat: <strong className="capitalize text-white">{quote.predicted_category}</strong>
+                  </span>
+                  <span
+                    className={`uppercase px-1.5 py-0.5 rounded ${
+                      quote.risk_level === "high"
+                        ? "bg-rose-500/20 text-rose-300"
+                        : quote.risk_level === "medium"
+                        ? "bg-amber-500/20 text-amber-300"
+                        : "bg-[#00D632]/15 text-[#00D632]"
+                    }`}
+                  >
+                    {quote.risk_level} risk
+                  </span>
+                </div>
+                {quote.cashback_rate > 0 && (
+                  <p className="text-[#00D632] flex items-center gap-1">
+                    <Sparkles className="size-3" /> Eligible for {Math.round(quote.cashback_rate * 1000) / 10}% Rewards Cashback!
+                  </p>
+                )}
+                {quote.duplicate_recent && (
+                  <p className="text-amber-300 flex items-center gap-1">
+                    <AlertTriangle className="size-3" /> Warning: Same amount paid to this recipient within 5 minutes.
+                  </p>
+                )}
+                {quote.cooling_off_active && (
+                  <p className="text-amber-300 flex items-center gap-1">
+                    <AlertTriangle className="size-3" /> New payee 24h cooling-off cap: max {formatINR(quote.cooling_cap)}.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {needsPinInput && (
+              <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-amber-200 min-w-0">
+                  <Lock className="size-3.5 shrink-0 text-amber-400" />
+                  <span className="text-[11px] font-medium truncate">
+                    PIN required ≥ {formatINR(pinThreshold)}
+                  </span>
+                </div>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={transactionPin}
+                  onChange={(e) => {
+                    setTransactionPin(e.target.value.replace(/\D/g, "").slice(0, 6));
+                    if (statusMessage && !isSuccess) setStatusMessage(null);
+                  }}
+                  placeholder="4-6 digit PIN"
+                  aria-label="Transaction PIN"
+                  className="w-28 h-8 px-2.5 rounded-lg bg-zinc-950 border border-amber-400/40 text-center font-mono text-xs tracking-widest text-white placeholder:text-zinc-600 focus:outline-none focus:border-[#00D632]"
+                />
+              </div>
+            )}
+
             <SlideToConfirm
               onConfirm={handleExecutePayment}
               label={
-                totalAmount > 0
-                  ? `Slide to Pay ${formatINR(totalAmount)} via UPI`
-                  : "Enter amount to Slide & Pay"
+                totalAmount > 0 ? `Slide to Pay ${formatINR(totalAmount)} via UPI` : "Enter amount to Slide & Pay"
               }
               confirmedLabel={`Paid ${formatINR(totalAmount)}! ✓`}
-              disabled={totalAmount <= 0}
+              disabled={totalAmount <= 0 || (needsPinInput && transactionPin.length < 4)}
             />
 
             {statusMessage && (
               <div
                 className={`text-xs text-center font-medium p-2 rounded-xl transition-all ${
                   isSuccess
-                    ? "bg-[#00D632]/15 text-[#00D632] border border-[#00D632]/30 flex items-center justify-center gap-1.5"
+                    ? "bg-[#00D632]/15 text-[#00D632] border border-[#00D632]/30 flex flex-col items-center justify-center gap-1.5"
                     : "bg-rose-500/15 text-rose-300 border border-rose-500/30"
                 }`}
               >
-                {isSuccess && <CheckCircle2 className="size-3.5" />}
-                <span>{statusMessage}</span>
+                <div className="flex items-center justify-center gap-1.5">
+                  {isSuccess && <CheckCircle2 className="size-3.5" />}
+                  <span>{statusMessage}</span>
+                </div>
+                {isSuccess && lastTxnId && quote && quote.cashback_rate > 0 && !cashbackClaimed && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const cb = await claimCashback(lastTxnId);
+                      if (cb.success) {
+                        setCashbackClaimed(true);
+                        setStatusMessage(`Paid ${formatINR(totalAmount)} + Claimed ${formatINR(cb.rewardAmount || 0)} Cashback ✓`);
+                      }
+                    }}
+                    className="px-3 py-1 rounded-lg bg-[#00D632] text-black text-[11px] font-bold cursor-pointer"
+                  >
+                    Claim Cashback Reward
+                  </button>
+                )}
               </div>
             )}
           </div>

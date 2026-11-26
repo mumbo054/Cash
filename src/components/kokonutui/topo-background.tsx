@@ -404,6 +404,21 @@ export function TopoBackground({
     const reduceMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)"
     ).matches;
+    const navConn = (
+      navigator as Navigator & {
+        connection?: { saveData?: boolean; effectiveType?: string };
+      }
+    ).connection;
+    const saveData = Boolean(navConn?.saveData);
+    const slowNetwork =
+      navConn?.effectiveType === "2g" || navConn?.effectiveType === "slow-2g";
+    const lowEndDevice =
+      saveData ||
+      slowNetwork ||
+      (typeof navigator.hardwareConcurrency === "number" &&
+        navigator.hardwareConcurrency <= 4) ||
+      window.innerWidth < 640;
+    const idleFrameMs = lowEndDevice ? 80 : IDLE_FRAME_MS;
     const noise = createNoise(seed);
 
     let width = 0;
@@ -431,7 +446,7 @@ export function TopoBackground({
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = lowEndDevice ? 1 : Math.min(window.devicePixelRatio || 1, 2);
       width = rect.width;
       height = rect.height;
       canvas.width = Math.round(width * dpr);
@@ -582,19 +597,18 @@ export function TopoBackground({
       const settling = hillMoving || ripples.length > 0;
 
       time += dt * speed;
-      // The drift alone is slow; half the frame rate looks the same and
-      // costs half as much. Anything following the hand gets every frame.
-      if (settling || now - lastPaint >= IDLE_FRAME_MS) {
+      // The drift alone is slow; throttling idle frames saves battery & CPU on mobile.
+      if (settling || now - lastPaint >= idleFrameMs) {
         paint(now);
         lastPaint = now;
       }
-      if (speed > 0 || settling) {
+      if ((speed > 0 && !saveData) || settling) {
         raf = requestAnimationFrame(frame);
       }
     };
 
     const start = () => {
-      if (!raf && visible && !reduceMotion) {
+      if (!raf && visible && !reduceMotion && !saveData) {
         last = 0;
         raf = requestAnimationFrame(frame);
       }

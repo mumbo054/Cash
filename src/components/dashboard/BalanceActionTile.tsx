@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useState } from "react";
 import {
   ArrowUpRight,
@@ -16,6 +17,7 @@ import {
 import { useWallet } from "@/context/WalletContext";
 import { formatINR } from "@/utils/formatters";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,21 +35,41 @@ interface BalanceActionTileProps {
   onOpenAddFunds: () => void;
 }
 
-export function BalanceActionTile({
+export const BalanceActionTile = React.memo(function BalanceActionTile({
   onOpenUPI,
   onOpenBankCard,
   onOpenAddFunds,
 }: BalanceActionTileProps) {
-  const { currentWallet, toggleWalletFreeze } = useWallet();
+  const { currentWallet, isLoading, toggleWalletFreeze } = useWallet();
   const [freezeDialogOpen, setFreezeDialogOpen] = useState(false);
   const [isFreezing, setIsFreezing] = useState(false);
-  // Default to false so balance looks like ***** initially
   const [showBalance, setShowBalance] = useState(false);
 
-  const balance = currentWallet?.balance ?? 45280.5;
+  if (isLoading && !currentWallet) {
+    return (
+      <div className="flex h-full w-full flex-col justify-between py-1" aria-busy="true">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-5 w-32 rounded-lg" />
+        </div>
+        <div className="my-auto space-y-2.5">
+          <Skeleton className="h-11 w-56" />
+          <Skeleton className="h-3.5 w-44" />
+        </div>
+        <div className="grid grid-cols-4 gap-2 pt-2 border-t border-white/10">
+          <Skeleton className="h-9 rounded-xl" />
+          <Skeleton className="h-9 rounded-xl" />
+          <Skeleton className="h-9 rounded-xl" />
+          <Skeleton className="h-9 rounded-xl" />
+        </div>
+      </div>
+    );
+  }
+
+  const balance = currentWallet?.balance ?? 0;
   const isFrozen = currentWallet?.is_frozen ?? false;
-  const walletNumber = currentWallet?.wallet_number || "CASH-8492019";
-  const dailyLimit = currentWallet?.daily_limit ?? 100000;
+  const walletNumber = currentWallet?.wallet_number || "CSH-••••0000";
+  const dailyLimit = currentWallet?.daily_limit ?? 50000;
 
   const handleConfirmFreezeToggle = async () => {
     setIsFreezing(true);
@@ -79,17 +101,16 @@ export function BalanceActionTile({
         </div>
       </div>
 
-      {/* Main Balance Display with Eye Toggle (Defaults to *****) */}
+      {/* Main Balance Display with Eye Toggle */}
       <div className="my-auto py-1">
         <div className="flex items-center gap-3">
           <span className="font-display text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-white font-mono leading-none truncate select-all">
             {showBalance ? formatINR(balance) : "*****"}
           </span>
 
-          {/* Eye Button to toggle hide/show balance */}
           <button
             type="button"
-            onClick={() => setShowBalance(!showBalance)}
+            onClick={() => setShowBalance((prev) => !prev)}
             className="flex size-8 items-center justify-center rounded-xl border border-white/15 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-400 hover:text-white transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
             title={showBalance ? "Hide balance (show as *****)" : "Show balance"}
             aria-label={showBalance ? "Hide balance" : "Show balance"}
@@ -124,7 +145,7 @@ export function BalanceActionTile({
         </div>
       </div>
 
-      {/* 4 Quick Action Buttons (Compact & Bleed-proof) */}
+      {/* 4 Quick Action Buttons */}
       <div className="grid grid-cols-4 gap-2 pt-2 border-t border-white/10 shrink-0">
         <Button
           type="button"
@@ -181,7 +202,6 @@ export function BalanceActionTile({
         </Button>
       </div>
 
-      {/* Freeze / Unfreeze Confirmation AlertDialog */}
       <AlertDialog open={freezeDialogOpen} onOpenChange={setFreezeDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -210,4 +230,4 @@ export function BalanceActionTile({
       </AlertDialog>
     </div>
   );
-}
+});

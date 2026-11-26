@@ -9,7 +9,7 @@
  * @github: https://github.com/kokonut-labs/kokonutui
  */
 
-import { CalendarDays, CreditCard, Mail, MessageCircle, X } from "lucide-react";
+import { CreditCard, MessageCircle, ShieldCheck, Sparkles, AlertTriangle, X } from "lucide-react";
 import {
   type KeyboardEvent,
   type PointerEvent,
@@ -20,6 +20,7 @@ import {
   useState,
 } from "react";
 import { cn } from "@/lib/utils";
+import { useWallet } from "@/context/WalletContext";
 
 export interface StackNotification {
   id: string;
@@ -29,57 +30,6 @@ export interface StackNotification {
   time: string;
   icon?: ReactNode;
 }
-
-const DEFAULT_NOTIFICATIONS: StackNotification[] = [
-  {
-    id: "n-1",
-    app: "Credit Card",
-    title: "HDFC Regalia Bill Due",
-    body: "₹18,450.00 due in 2 days. Pay early to keep your 790 CIBIL score intact.",
-    time: "now",
-    icon: (
-      <span className="flex size-8 items-center justify-center rounded-lg bg-rose-500/20 text-rose-400 border border-rose-500/30">
-        <CreditCard className="size-4" />
-      </span>
-    ),
-  },
-  {
-    id: "n-2",
-    app: "Autopay",
-    title: "Netflix Premium Scheduled",
-    body: "₹649.00 scheduled for autopay cut from Cash wallet tomorrow at 09:00 AM.",
-    time: "1h ago",
-    icon: (
-      <span className="flex size-8 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30">
-        <CalendarDays className="size-4" />
-      </span>
-    ),
-  },
-  {
-    id: "n-3",
-    app: "UPI Request",
-    title: "Priya Patel requested ₹1,200",
-    body: "\"Dinner & cabs from weekend reunion\" · Tap to accept & pay with 1-click.",
-    time: "3h ago",
-    icon: (
-      <span className="flex size-8 items-center justify-center rounded-lg bg-[#00D632]/20 text-[#00D632] border border-[#00D632]/30">
-        <MessageCircle className="size-4" />
-      </span>
-    ),
-  },
-  {
-    id: "n-4",
-    app: "Electricity",
-    title: "BESCOM Bill Generated",
-    body: "₹2,340.00 due on 14 Nov for Consumer ID 98214-001.",
-    time: "1d ago",
-    icon: (
-      <span className="flex size-8 items-center justify-center rounded-lg bg-sky-500/20 text-sky-400 border border-sky-500/30">
-        <Mail className="size-4" />
-      </span>
-    ),
-  },
-];
 
 const PEEK = 10;
 const VISIBLE_BEHIND = 2;
@@ -165,12 +115,79 @@ export interface NotificationStackProps {
   className?: string;
 }
 
+function formatRelativeTime(iso: string): string {
+  const diffSec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (diffSec < 60) return "now";
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+  return `${Math.floor(diffSec / 86400)}d ago`;
+}
+
+function categoryIcon(category: string): ReactNode {
+  if (category === "security" || category === "kyc") {
+    return (
+      <span className="flex size-8 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30">
+        <ShieldCheck className="size-4" />
+      </span>
+    );
+  }
+  if (category === "budget") {
+    return (
+      <span className="flex size-8 items-center justify-center rounded-lg bg-rose-500/20 text-rose-400 border border-rose-500/30">
+        <AlertTriangle className="size-4" />
+      </span>
+    );
+  }
+  if (category === "reward") {
+    return (
+      <span className="flex size-8 items-center justify-center rounded-lg bg-[#00D632]/20 text-[#00D632] border border-[#00D632]/30">
+        <Sparkles className="size-4" />
+      </span>
+    );
+  }
+  if (category === "request") {
+    return (
+      <span className="flex size-8 items-center justify-center rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30">
+        <MessageCircle className="size-4" />
+      </span>
+    );
+  }
+  return (
+    <span className="flex size-8 items-center justify-center rounded-lg bg-[#00D632]/20 text-[#00D632] border border-[#00D632]/30">
+      <CreditCard className="size-4" />
+    </span>
+  );
+}
+
 export default function NotificationStack({
-  notifications = DEFAULT_NOTIFICATIONS,
+  notifications: propNotifications,
   onDismiss,
   className,
 }: NotificationStackProps) {
-  const [items, setItems] = useState(notifications);
+  const {
+    notifications: dbNotifications,
+    markNotificationsRead,
+    notificationPrefs,
+    updateNotificationPrefs,
+  } = useWallet();
+
+  const liveUnread: StackNotification[] = dbNotifications
+    .filter((n) => !n.read_at)
+    .map((n) => ({
+      id: n.id,
+      app: n.category.toUpperCase(),
+      title: n.title,
+      body: n.body,
+      time: formatRelativeTime(n.created_at),
+      icon: categoryIcon(n.category),
+    }));
+
+  const resolvedSource = propNotifications ?? (liveUnread.length > 0 ? liveUnread : []);
+  const [items, setItems] = useState(resolvedSource);
+
+  useEffect(() => {
+    setItems(propNotifications ?? liveUnread);
+  }, [propNotifications, dbNotifications]);
   const [heights, setHeights] = useState<Record<string, number>>({});
   const [isExpanded, setIsExpanded] = useState(false);
   const [leaving, setLeaving] = useState<Set<string>>(() => new Set());
@@ -335,6 +352,9 @@ export default function NotificationStack({
       return next;
     });
     onDismiss?.(id);
+    if (!propNotifications) {
+      void markNotificationsRead([id]);
+    }
   };
 
   /**
@@ -516,24 +536,67 @@ export default function NotificationStack({
   return (
     // biome-ignore lint/a11y: hover and focus only widen the stack; every action has its own button.
     <div className={cn("w-full max-w-sm", className)}>
-      <div className="mb-3 flex h-7 items-center justify-between px-1">
+      <div className="mb-2 flex h-7 items-center justify-between px-1">
         <p className="font-medium text-sm text-zinc-900 dark:text-zinc-100">
-          Notifications
+          Unread Alerts
           <span className="ml-2 text-zinc-500 tabular-nums dark:text-zinc-400">
             {laidOut.length}
           </span>
         </p>
-        {laidOut.length > 1 && (
-          <button
-            aria-expanded={expanded}
-            className="rounded-md px-2 py-1 text-sm text-zinc-400 hover:text-white transition-colors duration-150 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 cursor-pointer"
-            onClick={() => setIsExpanded((prev) => !prev)}
-            type="button"
-          >
-            {expanded ? "Show less" : "Show all"}
-          </button>
-        )}
+        <div className="flex items-center gap-1.5">
+          {laidOut.length > 0 && !propNotifications && (
+            <button
+              type="button"
+              onClick={() => void markNotificationsRead()}
+              className="rounded-md px-2 py-1 text-[11px] font-semibold text-[#00D632] hover:bg-[#00D632]/10 cursor-pointer"
+            >
+              Mark all read
+            </button>
+          )}
+          {laidOut.length > 1 && (
+            <button
+              aria-expanded={expanded}
+              className="rounded-md px-2 py-1 text-xs text-zinc-400 hover:text-white transition-colors duration-150 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 cursor-pointer"
+              onClick={() => setIsExpanded((prev) => !prev)}
+              type="button"
+            >
+              {expanded ? "Collapse" : "Expand"}
+            </button>
+          )}
+        </div>
       </div>
+
+      {!propNotifications && (
+        <div className="mb-2.5 flex items-center gap-1 flex-wrap px-1 text-[10px]">
+          {(
+            [
+              { key: "tx_alerts", label: "TX" },
+              { key: "budget_alerts", label: "Budgets" },
+              { key: "request_alerts", label: "Requests" },
+              { key: "marketing_alerts", label: "Rewards" },
+            ] as const
+          ).map(({ key, label }) => {
+            const on = notificationPrefs?.[key] ?? true;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => void updateNotificationPrefs({ [key]: !on })}
+                className={`px-2 py-0.5 rounded-full border cursor-pointer transition-colors ${
+                  on
+                    ? "bg-[#00D632]/15 text-[#00D632] border-[#00D632]/30"
+                    : "bg-white/5 text-zinc-500 border-white/10"
+                }`}
+              >
+                {label}: {on ? "On" : "Off"}
+              </button>
+            );
+          })}
+          <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20">
+            Security: Locked On
+          </span>
+        </div>
+      )}
 
       <ol
         aria-label="Notifications"

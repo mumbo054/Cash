@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { Suspense, useState, useCallback } from 'react';
 import { TopoBackground } from '@/components/kokonutui/topo-background';
 import { DynamicText } from '@/components/kokonutui/dynamic-text';
 import { ParticleButton } from '@/components/kokonutui/ParticleButton';
@@ -18,11 +18,18 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import PasswordField from '@/registry/ruixenui/password-field';
 import { X, AlertCircle } from 'lucide-react';
-import { DashboardHome } from '@/components/dashboard/DashboardHome';
+import { DashboardSkeleton } from '@/components/dashboard/DashboardSkeleton';
 
-function GoogleLogo({ className = "w-4 h-4" }: { className?: string }) {
+// Split DashboardHome (with motion, WidgetGrid, and modals) into an async page chunk
+const loadDashboardChunk = () => import('@/components/dashboard/DashboardHome');
+const DashboardHome = React.lazy(loadDashboardChunk);
+const ComplianceDialog = React.lazy(() =>
+  import('@/components/dashboard/ComplianceDialog').then((m) => ({ default: m.ComplianceDialog }))
+);
+
+function GoogleLogo({ className = 'w-4 h-4' }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24">
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
       <path
         fill="#4285F4"
         d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -44,12 +51,10 @@ function GoogleLogo({ className = "w-4 h-4" }: { className?: string }) {
 }
 
 function LandingPage() {
-  const {
-    signInWithCredentials,
-    signUpNewUser,
-  } = useWallet();
+  const { signInWithCredentials, signUpNewUser } = useWallet();
 
   const [authModal, setAuthModal] = useState<'login' | 'join' | null>(null);
+  const [complianceOpen, setComplianceOpen] = useState(false);
 
   // Form states
   const [loginEmail, setLoginEmail] = useState('');
@@ -64,12 +69,18 @@ function LandingPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const prefetchDashboard = useCallback(() => {
+    void loadDashboardChunk();
+  }, []);
+
   const handleOpenLogin = () => {
+    prefetchDashboard();
     setFormError(null);
     setAuthModal('login');
   };
 
   const handleOpenJoin = () => {
+    prefetchDashboard();
     setFormError(null);
     setAcceptTerms(false);
     setAuthModal('join');
@@ -77,6 +88,7 @@ function LandingPage() {
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!loginEmail.trim() || !loginPassword) {
       setFormError('Please enter both your login ID and password.');
       return;
@@ -84,6 +96,7 @@ function LandingPage() {
 
     setIsSubmitting(true);
     setFormError(null);
+    prefetchDashboard();
 
     const res = await signInWithCredentials(loginEmail, loginPassword);
     setIsSubmitting(false);
@@ -99,6 +112,7 @@ function LandingPage() {
 
   const handleJoinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!joinName.trim() || !joinEmail.trim() || !joinPassword) {
       setFormError('Please provide your name, email, and password.');
       return;
@@ -116,6 +130,7 @@ function LandingPage() {
 
     setIsSubmitting(true);
     setFormError(null);
+    prefetchDashboard();
 
     const res = await signUpNewUser({
       fullName: joinName,
@@ -139,7 +154,6 @@ function LandingPage() {
 
   return (
     <div className="relative min-h-screen w-full bg-black text-zinc-100 flex flex-col font-sans overflow-hidden selection:bg-[#00D632] selection:text-black">
-      {/* Official Kokonut UI Topo Background with full-page container */}
       <TopoBackground
         className="min-h-screen w-full bg-black text-zinc-400 dark:bg-black dark:text-zinc-400 flex flex-col justify-between"
         speed={1}
@@ -166,6 +180,7 @@ function LandingPage() {
               <ParticleButton
                 variant="outline"
                 onClick={handleOpenLogin}
+                onMouseEnter={prefetchDashboard}
                 className="px-5 py-2.5 text-xs font-semibold font-sans backdrop-blur-xl border-white/15 bg-white/[0.04] hover:bg-white/[0.08]"
               >
                 Log In
@@ -174,6 +189,7 @@ function LandingPage() {
               <ParticleButton
                 variant="cash"
                 onClick={handleOpenJoin}
+                onMouseEnter={prefetchDashboard}
                 className="px-6 py-2.5 text-xs font-bold font-sans"
               >
                 Join Us
@@ -184,7 +200,6 @@ function LandingPage() {
 
         {/* Hero Section */}
         <main className="relative z-20 flex-1 flex flex-col items-center justify-center px-6 py-16 text-center max-w-4xl mx-auto">
-          {/* Cash + Kokonut UI Dynamic Text */}
           <h1 className="font-display text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-black tracking-[-0.04em] leading-[1.12] text-white mb-6">
             <span className="block mb-3">Cash</span>
             <span className="inline-block">
@@ -196,16 +211,15 @@ function LandingPage() {
             </span>
           </h1>
 
-          {/* Minimal Subtitle */}
           <p className="font-sans text-zinc-400 text-base sm:text-lg md:text-xl max-w-xl mx-auto mb-10 leading-relaxed font-normal">
             Send, save, and manage your money with lightning speed. Built for absolute simplicity and total financial control.
           </p>
 
-          {/* Hero CTAs */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
             <ParticleButton
               variant="cash"
               onClick={handleOpenJoin}
+              onMouseEnter={prefetchDashboard}
               showArrow
               className="w-full sm:w-auto px-8 py-4 text-base font-bold font-sans shadow-[0_0_25px_rgba(0,214,50,0.4)]"
             >
@@ -215,6 +229,7 @@ function LandingPage() {
             <ParticleButton
               variant="outline"
               onClick={handleOpenLogin}
+              onMouseEnter={prefetchDashboard}
               className="w-full sm:w-auto px-8 py-4 text-base font-sans backdrop-blur-xl border-white/15 bg-white/[0.04] hover:bg-white/[0.08]"
             >
               Log In
@@ -222,9 +237,23 @@ function LandingPage() {
           </div>
         </main>
 
-        {/* Minimal Footer Spacer */}
-        <footer className="h-10 w-full" />
+        {/* Simulation disclosure footer (PRD 4.11) */}
+        <footer className="relative z-20 py-3 px-6 text-center text-[11px] text-zinc-500 font-mono">
+          <button
+            type="button"
+            onClick={() => setComplianceOpen(true)}
+            className="hover:text-zinc-200 underline underline-offset-2 decoration-white/20 cursor-pointer"
+          >
+            Simulated Fintech Wallet · No real money or bank clearing · Disclosure & Privacy
+          </button>
+        </footer>
       </TopoBackground>
+
+      {complianceOpen && (
+        <Suspense fallback={null}>
+          <ComplianceDialog open={complianceOpen} onClose={() => setComplianceOpen(false)} />
+        </Suspense>
+      )}
 
       {/* Modal Dialog with Apple Glass Styling */}
       {authModal && (
@@ -238,19 +267,18 @@ function LandingPage() {
           }}
         >
           <div className="relative w-full max-w-sm">
-            {/* Close Button */}
             <button
               onClick={() => {
                 setAuthModal(null);
                 setFormError(null);
               }}
+              aria-label="Close modal"
               className="absolute top-4 right-4 z-20 p-2 rounded-full text-zinc-400 hover:text-white bg-white/[0.04] hover:bg-white/[0.1] border border-white/10 backdrop-blur-md transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
 
             {authModal === 'login' ? (
-              /* LOGIN CARD */
               <Card className="w-full max-w-sm">
                 <CardHeader>
                   <div className="flex items-start justify-between gap-3 pr-8">
@@ -342,7 +370,6 @@ function LandingPage() {
                 </CardFooter>
               </Card>
             ) : (
-              /* JOIN US CARD */
               <Card className="w-full max-w-sm">
                 <CardHeader>
                   <div className="flex items-start justify-between gap-3 pr-8">
@@ -425,7 +452,6 @@ function LandingPage() {
                         />
                       </div>
 
-                      {/* Terms and Conditions Checkbox */}
                       <div className="flex items-center gap-2 pt-1">
                         <Checkbox
                           id="terms"
@@ -470,10 +496,18 @@ function LandingPage() {
 }
 
 function MainContent() {
-  const { currentProfile } = useWallet();
+  const { currentProfile, isSessionRestoring } = useWallet();
+
+  if (isSessionRestoring && !currentProfile) {
+    return <DashboardSkeleton />;
+  }
 
   if (currentProfile) {
-    return <DashboardHome />;
+    return (
+      <Suspense fallback={<DashboardSkeleton />}>
+        <DashboardHome />
+      </Suspense>
+    );
   }
 
   return <LandingPage />;
