@@ -1,0 +1,39 @@
+name: Cash CI — Typecheck, Unit Tests, Build & Migration Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Scan for accidental secret or service_role exposure in frontend source
+        run: |
+          if grep -rnE "SUPABASE_SERVICE_ROLE_KEY|VITE_.*SERVICE_ROLE|sb_secret_|sbp_[a-zA-Z0-9]+" src/ index.html vercel.json public/; then
+            echo "ERROR: sensitive key or service_role variable detected in client code"
+            exit 1
+          fi
+
+      - name: Validate sequential SQL migrations
+        run: ls -1 supabase/migrations/*.sql | sort -C
+
+      - name: Run unit tests (Vitest)
+        run: npm test
+
+      - name: Run TypeScript typecheck & production bundle
+        run: npm run build
